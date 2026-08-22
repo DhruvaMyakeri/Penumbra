@@ -35,6 +35,7 @@ import cv2
 import numpy as np
 
 from ..config import gemini_api_key
+from .insights import rule_violations
 
 log = logging.getLogger("penumbra.director")
 
@@ -71,32 +72,56 @@ CANNOT DO (measured failures, do not propose these):
 - move objects to new positions
 - change the robot's motion - the trajectory is a fixed recording
 
-THE FAILURE MODE THAT RUINS EXPERIMENTS - write around it:
-This model invents objects. Measured over 42 renders, it added things nobody asked for
-in 17 of them: a toy robot, a full humanoid figure, duplicate cups, an extra bowl, a
-glass goblet. An invented object is almost certainly what the policy would react to, so
-the experiment then measures "a strange object appeared" rather than the situation you
-described - and the result has to be thrown away.
+THE FAILURE MODE THAT RUINS EXPERIMENTS - and the measured rule that controls it:
 
-Naming an object and asking for it to be *different* is what triggers this most often:
-"the yellow cup is now pink" invites the model to draw a second, pink cup beside the
-first. Prompts that describe a PROPERTY OF THE WHOLE SCENE or of a SURFACE fare better,
-because there is nothing for the model to instantiate.
+This model invents objects. Told to make the cup reflective, it draws a SECOND, shiny
+cup beside the first and leaves the original alone. Across 92 judged renders it invented
+something unrequested in 58% of them: duplicate cups, extra bowls, a toy robot, a glass
+goblet, a human hand. An invented object is almost certainly what the policy would react
+to, so the experiment then measures "a strange object appeared" rather than the situation
+you described, and the finding has to be thrown out.
 
-So avoid asking for an object to be SWAPPED or DUPLICATED, which is what triggers it:
-  RISKY "the cup is replaced by a pink one"     -> often yields two cups
-  RISKY "add a cloth beside the bowl"           -> the model cannot add objects anyway
+The rate is governed almost entirely by ONE property of the prompt - how many
+manipulable objects it names:
 
-MEASURED, and it cuts the other way - do not overcorrect:
-A run whose prompts were written as bare scene descriptions produced NO visible change
-at all in 7 of 18 renders: the model needs a strong, specific, visually decisive
-instruction or it declines and returns the scene as it was. A declined render is as
-useless as a hallucinated one.
+    objects named    renders showing what was asked    invented an object
+        0                      53%                            40%
+        1                      29%                            36%   <- use this
+        2                      18%                            73%
+        3 or more              20%                           100%
 
-So write prompts that are VIVID AND EXTREME about appearance while leaving the object
-inventory alone. State the change in strong, concrete visual terms - a colour, a
-material, a light, a covering - and do not hedge. "The yellow cup is drenched in glossy
-dark liquid with bright specular highlights" beats "the cup looks wet".
+Naming a second object roughly DOUBLES the invention rate. Every prompt that named three
+invented something.
+
+RULE 1 - EVERY PROMPT NAMES AT MOST ONE MANIPULABLE OBJECT.
+One cup, or one bowl, or the gripper - never two, never "the cup and the bowl", never
+"both containers". If your situation is really about two objects, pick the one that
+matters and write only that. Do not mention the other even in passing, even as scenery.
+
+RULE 2 - NEVER TARGET A PART OF AN OBJECT.
+Rims, edges, lips, handles, gripper fingers, "the chips inside the cup", "the inner
+wall". Ten prompts did this; ZERO produced a usable render. This model works at the
+scale of a whole object or a whole surface. Below that it substitutes something else.
+
+RULE 3 - NEVER DESCRIBE THE CAMERA, LENS, FRAME OR IMAGE.
+It edits the scene, not the optics. A "smudged lens" prompt gets you a new object on the
+table instead.
+
+DO NOT OVERCORRECT INTO BLANDNESS:
+A run written as bare, mild scene descriptions produced NO visible change at all in 7 of
+18 renders - the model declined and returned the scene as it was, which wastes the
+scenario just as thoroughly. Within the rules above, be VIVID AND EXTREME: name a
+specific colour, material or covering and state it as already present and unmistakable.
+"The bowl is filled to the brim with dense fluffy white foam" is right - one object,
+whole object, unambiguous. "The cup looks a bit wet" is not.
+
+AND THE TWO CAMERAS MUST AGREE:
+Each camera is rendered in a SEPARATE pass with no shared seed, so the two passes can
+easily produce different scenes - and measured on the last suite, 19 of 21 renders did.
+When the cameras disagree the policy is shown two contradictory worlds and the result is
+unusable no matter how large the effect. A prompt that admits only one interpretation is
+one both passes can agree on: one object, one named colour or material, one sentence, no
+vague adjectives, nothing implying an object that is not already in the scene.
 
 WHERE THIS POLICY IS ACTUALLY SENSITIVE - measured over 46 tested situations:
 
@@ -109,10 +134,18 @@ Changing only the background - tabletop colour, room lighting, wall texture, flo
 has never once moved this policy. Nine attempts, median effect zero. A suite made of
 scene-only situations returns nothing, and that has already happened once.
 
-The appearance of the OBJECTS THE ROBOT IS MANIPULATING is where the sensitivity lives:
-the cup, the bowl, their contents, their rims, their surfaces, the gripper. Aim most
-situations there. Keep a couple of scene-only ones as a check on the null above - it
-should keep being tested, not assumed - but do not build the suite out of them.
+The appearance of the OBJECT THE ROBOT IS MANIPULATING is where the sensitivity lives:
+the cup, or the bowl, or their contents, or the gripper - one of them per situation, as
+a whole object, per Rules 1 and 2. Aim most situations there. Keep a couple of
+scene-only ones as a check on the null above - it should keep being tested, not
+assumed - but do not build the suite out of them.
+
+Note the trap in combining that with Rule 1: the sensitivity lives in the objects, and
+the renderer breaks when you name more than one of them. The situations that work are
+therefore narrow and deep - ONE object, transformed drastically - not broad scene
+dressing. "The bowl's interior is filled with glossy black liquid" beats "the workspace
+is wet and grimy" for finding something, and beats "the cup and bowl are both greasy"
+for actually rendering.
 
 The camera geometry, the robot's motion, and the physics all come from a real
 recording and cannot change. Only how the scene LOOKS can change.
@@ -150,6 +183,9 @@ class Scenario:
     realism: int = 3
     source: str = MODEL
     category: str = "general"
+    #: Measured rules this prompt still breaks after the repair pass. Empty is normal;
+    #: a non-empty list is a warning attached to the proposal, not a reason to drop it.
+    rule_violations: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -161,6 +197,7 @@ class Scenario:
             "realism": self.realism,
             "source": self.source,
             "category": self.category,
+            "rule_violations": self.rule_violations,
         }
 
     def to_fault_doc(self, views: tuple[str, ...]) -> dict:
@@ -187,6 +224,10 @@ class DirectorResult:
     scenarios: list[Scenario] = field(default_factory=list)
     raw: str = ""
     error: str | None = None
+    #: One line per proposal whose prompt broke a measured rule, saying whether the
+    #: repair pass fixed it. Surfaced in the run record so a reader can see how often
+    #: the director had to be corrected.
+    repairs: list = field(default_factory=list)
 
 
 def _frame_to_b64(frame: np.ndarray, width: int = 640) -> str:
@@ -274,6 +315,84 @@ def _parse(text: str) -> list[Scenario]:
     return out
 
 
+REPAIR_INSTRUCTIONS = """You wrote these edit prompts for a video model, and each one
+breaks a rule that is measured rather than stylistic. Rewrite each prompt so it obeys
+every rule, WITHOUT changing which situation is being tested.
+
+{listing}
+
+The rules, and what breaking them costs:
+
+  1. At most ONE manipulable object named per prompt (cup, bowl, gripper, container).
+     One object: 36% chance the model invents something. Two: 73%. Three: 100%.
+     If the situation involves two objects, pick the one that matters and describe only
+     that. Do not mention the other at all.
+  2. Never target a part of an object - rim, edge, lip, handle, gripper finger, the
+     chips inside a cup. 0 of 10 such prompts produced a usable render. Whole objects
+     and whole surfaces only.
+  3. Never describe the camera, lens, frame or image. The model edits the scene.
+
+Keep them vivid and extreme - a specific colour, material or covering, stated as already
+present. A mild prompt gets declined and wastes the scenario just as surely.
+
+Reply with JSON only, an array in the same order, no markdown fence:
+[{{"name": "<the name you were given>", "prompt": "<the rewritten prompt>"}}]
+"""
+
+
+def _repair_prompts(scenarios: list) -> tuple[list, list]:
+    """Rewrite any proposed prompt that breaks a measured rule.
+
+    Returns (scenarios, notes). The director is told the rules in its own briefing and
+    still breaks them - the previous suite produced eleven two-object prompts under
+    guidance that already said not to. An instruction nothing verifies is a suggestion,
+    and the cost of this particular suggestion being ignored is a wasted render plus a
+    wasted slot in the multiplicity correction. So the prompts are checked mechanically
+    and the violators go back once.
+
+    A prompt that still violates after the repair pass is kept and flagged rather than
+    dropped: the scenario is the director's idea, the phrasing is the renderer's
+    problem, and the render agent gets another go at it in the loop.
+    """
+    bad = [(s, rule_violations(s.prompt)) for s in scenarios]
+    bad = [(s, v) for s, v in bad if v]
+    if not bad:
+        return scenarios, []
+
+    listing = "\n\n".join(
+        f'  name: {s.name}\n  prompt: "{s.prompt}"\n  breaks: '
+        + "; ".join(v) for s, v in bad
+    )
+    payload = {
+        "contents": [{"parts": [{"text": REPAIR_INSTRUCTIONS.format(listing=listing)}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 4096},
+    }
+    notes = []
+    try:
+        raw = _call(payload, timeout=120.0, attempts=3)
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[1].rsplit("```", 1)[0]
+        fixed = json.loads(cleaned[cleaned.find("["): cleaned.rfind("]") + 1])
+        by_name = {str(d.get("name")): str(d.get("prompt", "")).strip() for d in fixed}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("prompt repair pass failed: %s", exc)
+        return scenarios, [f"prompt repair unavailable: {type(exc).__name__}"]
+
+    for s, violations in bad:
+        candidate = by_name.get(s.name, "")
+        if candidate and not rule_violations(candidate):
+            notes.append(f"{s.name}: rewritten ({violations[0][:70]})")
+            s.prompt = candidate
+        else:
+            s.rule_violations = violations
+            notes.append(f"{s.name}: STILL BREAKS RULES - {violations[0][:70]}")
+            log.info("director prompt for %s still violates: %s", s.name, violations)
+    log.info("prompt repair: %d of %d proposals rewritten",
+             sum(1 for n in notes if "rewritten" in n), len(bad))
+    return scenarios, notes
+
+
 def propose(
     task: str,
     frames: dict[str, np.ndarray],
@@ -281,6 +400,7 @@ def propose(
     n: int = 6,
     avoid: list[str] | None = None,
     category: tuple[str, str] | None = None,
+    brief: str = "",
 ) -> DirectorResult:
     """Propose `n` scenarios for this task, having looked at the actual scene.
 
@@ -295,8 +415,9 @@ def propose(
         f"\n\nDo NOT repeat these already-tested scenarios: {', '.join(avoid)}"
         if avoid else ""
     )
+    learned = f"\n\nWHAT THIS RUN HAS LEARNED SO FAR:\n{brief}" if brief else ""
     parts.append({"text":
-        f"{SYSTEM}\n\n{CAPABILITIES}\n\n"
+        f"{SYSTEM}\n\n{CAPABILITIES}{learned}\n\n"
         f"ROBOT TASK: \"{task}\"\n"
         f"CAMERA VIEWS AVAILABLE: {view_list}\n"
         f"The images below are the actual workspace, one per camera view, in that order."
@@ -321,37 +442,98 @@ def propose(
     except Exception as exc:  # noqa: BLE001
         log.warning("director output unparseable: %s", exc)
         return DirectorResult(raw=raw, error=f"unparseable: {exc}")
+    scenarios, repair_notes = _repair_prompts(scenarios)
     log.info("director proposed %d scenarios", len(scenarios))
-    return DirectorResult(scenarios=scenarios, raw=raw)
+    return DirectorResult(scenarios=scenarios, raw=raw, repairs=repair_notes)
 
-#: Categories the suite sweeps. A freeform batch clusters - ask an LLM for twenty
-#: failure modes and it gives you fifteen lighting variations. Sweeping named
-#: categories forces coverage of mechanisms that are genuinely different from each
-#: other, which is what a test suite is for.
-CATEGORIES: dict[str, str] = {
-    "object_appearance": "the task-relevant objects change colour, material, finish or "
-                         "how strongly they contrast with their surroundings",
-    "confusable_objects": "something in the scene comes to resemble the target object, "
-                          "or the target comes to resemble a distractor or the background",
-    "surface_and_spill": "the work surface changes - spills, stains, wetness, "
-                         "reflectivity, texture, debris",
-    "lighting": "illumination changes - time of day, shadows, colour temperature, "
-                "glare, backlight, flicker, a light failing",
-    "sensor_fault": "the camera itself degrades - smudge, dust, water droplets, "
-                    "condensation, defocus, exposure error, colour cast",
-    "environment": "the wider workspace changes - wall colour, clutter behind the "
-                   "bench, a different room, background motion",
-    "contents_and_state": "what is inside or on the objects changes - fill level, "
-                          "contents colour, emptiness, spillage from the object itself",
+#: Categories the suite sweeps, with how many situations each is worth. A freeform
+#: batch clusters - ask an LLM for twenty failure modes and it gives you fifteen
+#: lighting variations - so sweeping named categories forces coverage of mechanisms
+#: that are genuinely different from each other.
+#:
+#: The weights are measured, not aesthetic. Categories that target the manipulated
+#: objects are where every vulnerability this project has ever found came from;
+#: `environment` has gone 0 for 9 and `sensor_fault` describes the camera, which this
+#: renderer does not edit (0 of 3 usable). Both are kept at weight 1 rather than
+#: deleted, because a null that stops being tested quietly becomes an assumption - and
+#: because if the renderer or the policy changes, that is where it would show first.
+CATEGORIES: dict[str, dict] = {
+    "object_appearance": {
+        "weight": 3,
+        "definition": "ONE task-relevant object changes colour, material, finish or how "
+                      "strongly it contrasts with its surroundings",
+    },
+    "contents_and_state": {
+        "weight": 3,
+        "definition": "what is inside or on ONE object changes - fill level, contents "
+                      "colour, emptiness, a coating over the whole object",
+    },
+    "confusable_objects": {
+        "weight": 3,
+        "definition": "ONE object comes to resemble something it is not - the target "
+                      "looks like the background, or like the other container. Describe "
+                      "only the object that changes, never the thing it now resembles",
+    },
+    "surface_and_spill": {
+        "weight": 2,
+        "definition": "the work surface changes - spills, stains, wetness, reflectivity, "
+                      "texture, debris. Name the surface, not the objects on it",
+    },
+    "lighting": {
+        "weight": 2,
+        "definition": "illumination changes - time of day, shadows, colour temperature, "
+                      "glare, backlight, a light failing",
+    },
+    "environment": {
+        "weight": 1,
+        "definition": "the wider workspace changes - wall colour, clutter behind the "
+                      "bench, a different room. KEPT AS A NULL CONTROL: this category "
+                      "has never moved the policy in 9 attempts, and is included so "
+                      "that keeps being tested rather than assumed",
+    },
+    "sensor_fault": {
+        "weight": 1,
+        "definition": "the scene degrades in a way that mimics a failing camera - haze, "
+                      "condensation on the objects, a colour cast over everything. "
+                      "Describe it as a property of the SCENE, never of the lens",
+    },
 }
+
+
+def _allocate(total: int, categories: dict) -> dict:
+    """Split `total` situations across categories by weight, everyone getting at least 1.
+
+    Proportional with largest-remainder, so the counts sum to exactly `total` rather
+    than drifting the way per-category rounding does. Every category keeps a floor of
+    one: the two low-weight categories are null controls, and a control that rounds away
+    at small suite sizes stops being a control.
+    """
+    names = list(categories)
+    if total <= len(names):
+        return {n: 1 for n in names[:max(1, total)]}
+    weights = {n: max(1, categories[n].get("weight", 1)) for n in names}
+    total_w = sum(weights.values())
+    exact = {n: total * w / total_w for n, w in weights.items()}
+    alloc = {n: max(1, int(exact[n])) for n in names}
+    # Largest remainder first, then hand back any overshoot from the biggest allocations,
+    # which is where a single scenario costs the least coverage.
+    while sum(alloc.values()) < total:
+        n = max(names, key=lambda k: exact[k] - alloc[k])
+        alloc[n] += 1
+    while sum(alloc.values()) > total:
+        n = max((k for k in names if alloc[k] > 1), key=lambda k: alloc[k] - exact[k])
+        alloc[n] -= 1
+    return alloc
 
 
 def propose_suite(
     task: str,
     frames: dict[str, np.ndarray],
     *,
+    total: int | None = None,
     per_category: int = 3,
-    categories: dict[str, str] | None = None,
+    categories: dict | None = None,
+    brief: str = "",
     on_progress=None,
 ) -> DirectorResult:
     """Sweep every category, so the suite covers mechanisms rather than variations.
@@ -359,18 +541,30 @@ def propose_suite(
     Each category is a separate call carrying the names already proposed, so the
     director does not rediscover the same idea under a new name. A category that fails
     is skipped rather than aborting the sweep - a partial suite is still a suite.
+
+    `total` splits that many situations across the categories by their measured weight,
+    which is what a caller asking for "21 scenarios" means. `per_category` is the older
+    flat behaviour and is used only when `total` is not given.
     """
     cats = categories or CATEGORIES
+    quota = _allocate(total, cats) if total else {c: per_category for c in cats}
     out: list[Scenario] = []
     errors: list[str] = []
-    for category, definition in cats.items():
+    repairs: list[str] = []
+    for category, spec in cats.items():
+        n = quota.get(category, 0)
+        if n <= 0:
+            continue
+        definition = spec["definition"] if isinstance(spec, dict) else spec
         result = propose(
             task,
             frames,
-            n=per_category,
+            n=n,
             avoid=[s.name for s in out],
             category=(category, definition),
+            brief=brief,
         )
+        repairs.extend(result.repairs)
         if result.error:
             log.warning("category %s failed: %s", category, result.error)
             errors.append(f"{category}: {result.error}")
@@ -380,7 +574,8 @@ def propose_suite(
                 continue
             scenario.category = category
             out.append(scenario)
-        log.info("category %-20s +%d (%d total)", category, len(result.scenarios), len(out))
+        log.info("category %-20s asked %d, +%d (%d total)",
+                 category, n, len(result.scenarios), len(out))
         if on_progress:
             # The sweep takes a couple of minutes; without this the dashboard sits
             # blank while the most interesting part - what the director thinks could
@@ -389,4 +584,5 @@ def propose_suite(
                 on_progress(category, list(out), len(cats))
             except Exception:  # noqa: BLE001
                 log.debug("director progress hook failed", exc_info=True)
-    return DirectorResult(scenarios=out, error="; ".join(errors) if errors and not out else None)
+    return DirectorResult(scenarios=out, repairs=repairs,
+                          error="; ".join(errors) if errors and not out else None)

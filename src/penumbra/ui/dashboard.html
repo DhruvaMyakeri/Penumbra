@@ -18,6 +18,10 @@
   --hit:#E0A050; --hit-dim:#33261A;
   --bad:#DE7477; --bad-dim:#331E1F;
   --ok:#6FB97E; --ok-dim:#18291B;
+  /* Unattributed: a real effect whose cause is not established. Deliberately its own
+     colour - neither the confirmed amber nor the rejected red - because it is neither
+     a finding you may quote nor a result you may discard. */
+  --unatt:#A88BC4; --unatt-dim:#241D2E;
 }
 *{box-sizing:border-box}
 html,body{background:var(--ground)}
@@ -85,6 +89,7 @@ h2{font-size:10.5px;letter-spacing:.17em;text-transform:uppercase;color:var(--fa
 .card.hit{border-left-color:var(--hit)}
 .card.clear{border-left-color:var(--ok)}
 .card.rej{border-left-color:var(--bad)}
+.card.unatt{border-left-color:var(--unatt)}
 .card.busy{border-left-color:var(--accent)}
 .card.wait{border-left-color:var(--rule)}
 .card-top{display:flex;justify-content:space-between;gap:12px;align-items:baseline;
@@ -97,6 +102,7 @@ h2{font-size:10.5px;letter-spacing:.17em;text-transform:uppercase;color:var(--fa
 .t-hit{color:var(--hit);background:var(--hit-dim)}
 .t-ok{color:var(--ok);background:var(--ok-dim)}
 .t-bad{color:var(--bad);background:var(--bad-dim)}
+.t-unatt{color:var(--unatt);background:var(--unatt-dim)}
 .t-busy{color:var(--accent);background:var(--accent-dim)}
 .t-wait{color:var(--faint);background:var(--sunk)}
 
@@ -108,11 +114,21 @@ h2{font-size:10.5px;letter-spacing:.17em;text-transform:uppercase;color:var(--fa
 .v-hit{background:var(--hit-dim);color:var(--hit)}
 .v-ok{background:var(--sunk);color:var(--dim)}
 .v-bad{background:var(--bad-dim);color:var(--bad)}
+.v-unatt{background:var(--unatt-dim);color:var(--unatt)}
 
 .intent{font-size:12px;padding:9px 11px;border-radius:2px;margin-bottom:10px;
   background:var(--sunk);border-left:2px solid var(--rule);color:var(--dim)}
 .intent.bad{border-left-color:var(--bad)}
 .intent.ok{border-left-color:var(--ok)}
+.intent.incoherent{border-left-color:var(--unatt)}
+.incoh{margin-top:6px;color:var(--unatt)}
+.incoh b{color:var(--unatt)}
+table.cams{width:100%;border-collapse:collapse;font-size:11px;margin-top:8px}
+table.cams th{text-align:left;color:var(--faint);font-weight:400;padding:3px 6px;
+  border-bottom:1px solid var(--rule)}
+table.cams td{padding:3px 6px;border-bottom:1px solid var(--rule);color:var(--dim);
+  vertical-align:top}
+table.cams tr.differ td{color:var(--unatt)}
 .intent b{color:var(--bad)}
 .halluc{margin-top:6px;color:var(--bad)}
 .halluc b{color:var(--bad)}
@@ -252,13 +268,38 @@ function renderRail(phase) {
 
 /* -------------------------------------------------------------------- cards */
 
+function findingClass(s) {
+  /* Runs made before the taxonomy existed have no `finding_class`, and replay of those
+     runs is a stated requirement. Derive it from what they DO carry rather than letting
+     every old card fall through to "no effect", which would silently rewrite history in
+     the friendlier direction. Old runs have no cross-camera check, so a render their
+     judge accepted is still only provisionally attributable - `coherent` being absent
+     is treated as unknown, not as agreement. */
+  if (s.finding_class) { return s.finding_class; }
+  if (s.status === "no_change") { return "DECLINED"; }
+  if (s.status === "rejected") { return "REJECTED"; }
+  if (s.status === "error") { return "ERROR"; }
+  if (s.status !== "done") { return "PENDING"; }
+  if (!s.is_vulnerability) { return "NO EFFECT"; }
+  var iv = s.intent || {};
+  if (iv.coherent === false) { return "UNATTRIBUTED"; }
+  if (!iv.verdict || iv.error || iv.credible === false) { return "UNATTRIBUTED"; }
+  return "CONFIRMED";
+}
+
 function statusTag(s) {
   if (s.status === "rejected") return ["rej", "t-bad", "render rejected"];
   if (s.status === "no_change") return ["wait", "t-wait", "editor declined"];
   if (s.status === "error") return ["rej", "t-bad", "failed"];
   if (s.status === "done") {
-    if (s.is_vulnerability) {
-      return ["hit", "t-hit", s.passes_bonferroni ? "vulnerability · strong" : "vulnerability"];
+    /* CONFIRMED and UNATTRIBUTED are both real effects, but only one of them is
+       entitled to its own name, and showing them under one label is what let a suite
+       advertise fifteen findings that adjudication cut to three. */
+    if (findingClass(s) === "CONFIRMED") {
+      return ["hit", "t-hit", s.passes_bonferroni ? "confirmed · strong" : "confirmed"];
+    }
+    if (findingClass(s) === "UNATTRIBUTED") {
+      return ["unatt", "t-unatt", "moved policy · cause unknown"];
     }
     /* Significant alone but not after suite-wide correction: say so, rather than
        showing it as a plain miss. */
@@ -273,7 +314,9 @@ function statusTag(s) {
 }
 
 function bucket(s) {
-  if (s.is_vulnerability) return "hits";
+  var fc = findingClass(s);
+  if (fc === "CONFIRMED") return "hits";
+  if (fc === "UNATTRIBUTED") return "unatt";
   if (s.status === "no_change") return "nochange";
   if (s.status === "rejected" || s.status === "error") return "rejected";
   if (s.status === "done") return "clear";
@@ -337,28 +380,62 @@ function media(s) {
   return bits.join("");
 }
 
+function cameraTable(iv) {
+  /* What EACH camera rendered, kept side by side. The merged verdict above is a
+     summary; this is the evidence. It exists because "2/2 cameras agree" was once
+     reported for two cameras that agreed only on the label "something else" while
+     showing entirely different scenes. */
+  var pv = iv.per_view || {};
+  var views = Object.keys(pv);
+  if (views.length < 2) { return ""; }
+  var differ = iv.coherent === false;
+  return '<table class="cams"><thead><tr><th>camera</th><th>verdict</th>' +
+    "<th>what this camera shows</th></tr></thead><tbody>" +
+    views.map(function (v) {
+      var d = pv[v] || {};
+      return '<tr class="' + (differ ? "differ" : "") + '"><td>' + esc(v) + "</td><td>" +
+        esc(String(d.verdict || "?").replace(/_/g, " ")) + "</td><td>" +
+        esc(d.observed || "—") + "</td></tr>";
+    }).join("") + "</tbody></table>";
+}
+
 function intent(iv) {
   /* Whether the render shows what the situation's NAME claims. Never gates anything:
      an unsupported name leaves the statistics intact and only removes the right to
      say what caused the change. */
   if (!iv || !iv.verdict || iv.verdict === "unknown") { return ""; }
+  var incoherent = iv.coherent === false;
   var bad = iv.credible === false;
   var label = String(iv.verdict).replace(/_/g, " ");
   var added = (iv.added_objects || []).filter(function (o) { return o; });
-  return '<div class="intent ' + (bad ? "bad" : "ok") + '">' +
-    '<span class="tag ' + (bad ? "t-bad" : "t-ok") + '">render ' + esc(label) + "</span> " +
+  var cls = incoherent ? "incoherent" : (bad ? "bad" : "ok");
+  return '<div class="intent ' + cls + '">' +
+    '<span class="tag ' + (incoherent ? "t-unatt" : (bad ? "t-bad" : "t-ok")) +
+    '">render ' + esc(label) + "</span> " +
     esc(iv.observed || iv.note) +
-    (bad ? " <b>The measured effect stands; the situation's name does not.</b>" : "") +
+    (bad && !incoherent
+      ? " <b>The measured effect stands; the situation's name does not.</b>" : "") +
+    /* The cameras disagreeing is a different and worse problem than a mislabelled
+       render: there is no single scene to have named. It gets its own line. */
+    (incoherent
+      ? '<div class="incoh"><b>The two cameras rendered different scenes.</b> ' +
+        esc(iv.coherence_note || "") +
+        " Each camera is a separate pass with no shared seed. The policy read both in " +
+        "one observation, so it was shown two different worlds and no situation name " +
+        "describes its input.</div>"
+      : "") +
     /* An invented object is the most likely thing the policy is actually reacting to,
        so it gets its own line rather than being buried in the sentence above. */
     (added.length
       ? '<div class="halluc">invented, not requested: <b>' +
         added.map(esc).join(", ") + "</b></div>"
       : "") +
+    cameraTable(iv) +
     '<div class="fineprint">independent vision-model adjudication (' + esc(iv.model) +
     "), not measurement — recorded to let you discount a finding, never to promote one" +
     (iv.views_judged && iv.views_judged.length
-      ? " · " + iv.views_judged.length + " camera(s) judged" : "") + "</div></div>";
+      ? " · " + iv.views_judged.length + " camera(s) judged" : "") +
+    "</div></div>";
 }
 
 function attemptTrail(s) {
@@ -408,7 +485,8 @@ function viewTable(perView) {
 function scenarioCard(s) {
   var t = statusTag(s);
   var vcls = (s.status === "rejected" || s.status === "error") ? "v-bad"
-           : (s.is_vulnerability ? "v-hit" : "v-ok");
+           : findingClass(s) === "CONFIRMED" ? "v-hit"
+           : findingClass(s) === "UNATTRIBUTED" ? "v-unatt" : "v-ok";
   return '<div class="card ' + t[0] + '">' +
     '<div class="card-top"><span><span class="name">' + esc(s.name) + "</span>" +
     (s.category ? '<span class="cat">' + esc(s.category) + "</span>" : "") +
@@ -490,7 +568,8 @@ function render(st) {
   renderRail(st.phase);
 
   var sc = st.scenarios || [];
-  var hits = sc.filter(function (s) { return s.is_vulnerability; }).length;
+  var hits = sc.filter(function (s) { return findingClass(s) === "CONFIRMED"; }).length;
+  var unatt = sc.filter(function (s) { return findingClass(s) === "UNATTRIBUTED"; }).length;
   var rej = sc.filter(function (s) { return s.status === "rejected"; }).length;
   var err = sc.filter(function (s) { return s.status === "error"; }).length;
   var tested = sc.filter(function (s) { return s.vs_control; }).length;
@@ -502,7 +581,11 @@ function render(st) {
     ["Situations", sc.length, false],
     ["Gate passed", Math.max(0, sc.length - rej - err), false],
     ["Tested", tested, false],
-    ["Vulnerabilities", hits, hits > 0],
+    /* The headline is CONFIRMED alone. "Moved the policy" sits beside it rather than
+       inside it: those two numbers came apart badly once and the split has to be the
+       first thing a reader sees, not a footnote. */
+    ["Confirmed findings", hits, hits > 0],
+    ["Moved policy, cause unknown", unatt, false],
     ["Renders rejected", rej, false],
     /* How often the editor actually produced the situation it was asked for. Low here
        is not a bug in the suite - it is a measured property of the video model, and it
@@ -553,11 +636,12 @@ function render(st) {
     "</b></div><div>Bonferroni <b>" + corr.discoveries_bonferroni.length +
     "</b></div></div></div>";
 
-  var counts = { all: sc.length, hits: 0, clear: 0, rejected: 0, nochange: 0, pending: 0 };
+  var counts = { all: sc.length, hits: 0, unatt: 0, clear: 0, rejected: 0,
+                 nochange: 0, pending: 0 };
   sc.forEach(function (s) { counts[bucket(s)] += 1; });
-  var labels = [["all", "all"], ["hits", "vulnerabilities"], ["clear", "no effect"],
-                ["rejected", "rejected"], ["nochange", "editor declined"],
-                ["pending", "pending"]];
+  var labels = [["all", "all"], ["hits", "confirmed"], ["unatt", "cause unknown"],
+                ["clear", "no effect"], ["rejected", "rejected"],
+                ["nochange", "editor declined"], ["pending", "pending"]];
   $("chips").innerHTML = labels.map(function (l) {
     return '<button class="chip" data-f="' + l[0] + '" aria-pressed="' +
       (FILTER === l[0]) + '">' + l[1] + " " + counts[l[0]] + "</button>";

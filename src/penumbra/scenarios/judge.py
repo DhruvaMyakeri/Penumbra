@@ -84,6 +84,16 @@ class IntentVerdict:
     #: Objects the render invented that nobody asked for. X2's characteristic failure,
     #: and the most likely thing a policy is actually reacting to.
     added_objects: list = field(default_factory=list)
+    #: Every camera's own verdict, kept rather than collapsed. The merged verdict below
+    #: is a summary; this is the evidence, and it is what makes the coherence check
+    #: auditable after the fact.
+    per_view: dict = field(default_factory=dict)
+    #: Do the cameras show the *same* situation? None when only one camera was judged.
+    #: False is a hard problem: the policy is being shown two different worlds at once,
+    #: so no single situation name describes its input and the run cannot attribute a
+    #: behaviour change to anything.
+    coherent: bool | None = None
+    coherence_note: str = ""
 
     @property
     def credible(self) -> bool:
@@ -92,7 +102,13 @@ class IntentVerdict:
         `partially_applied` counts: a partial glare is still glare. `not_applied` and
         `something_else` do not, and a scenario carrying either should have its *name*
         distrusted even when its statistics are sound.
+
+        Incoherence overrides the verdict. If the two cameras show different situations
+        then there is no single thing the render depicts, and "applied" on the luckier
+        camera does not rescue that - the policy consumed both.
         """
+        if self.coherent is False:
+            return False
         return self.verdict in ("applied", "partially_applied")
 
     def to_dict(self) -> dict:
@@ -106,6 +122,9 @@ class IntentVerdict:
             "added_objects": self.added_objects,
             "hallucinated": bool(self.added_objects),
             "views_judged": self.views_judged,
+            "per_view": self.per_view,
+            "coherent": self.coherent,
+            "coherence_note": self.coherence_note,
             "error": self.error,
             "caveat": ("vision-model adjudication, not measurement. Recorded to let a "
                        "reader discount a finding, never to promote one; nothing in the "
@@ -178,18 +197,116 @@ def judge_render(
     )
 
 
+COHERENCE_INSTRUCTIONS = """Two cameras filmed the SAME moment of the SAME scene from
+different angles. Both were then edited by the same video model, in two separate passes,
+and each pass was described independently by an observer who saw only that camera.
+
+Camera descriptions of what changed:
+
+{descriptions}
+
+The two cameras are looking at one physical scene, so a single real change should show
+up in both descriptions, allowing for the fact that a different angle shows different
+things and that one camera may not see a change at all.
+
+Decide whether these describe ONE consistent change to one scene, or TWO DIFFERENT
+changes. Judge the substance, not the wording: "the bowl is filled with dark liquid" and
+"the bowl now contains a black glossy fluid" are the same change. "A pink bucket was
+added on the left" and "the tabletop became chrome" are not.
+
+Being generous here defeats the purpose. If one camera reports a new object that the
+other does not report at all, that is a disagreement, because an object exists in the
+scene or it does not.
+
+Reply with JSON only, no markdown fence:
+
+{{"coherent": true | false,
+  "shared_change": "<the one change both cameras support, or empty if none>",
+  "disagreement": "<what differs between the cameras, or empty if they agree>",
+  "confidence": <0.0-1.0>}}
+"""
+
+
+def check_coherence(per_view: dict) -> tuple[bool | None, str]:
+    """Do the cameras show the same situation? Returns (coherent, explanation).
+
+    This exists because each camera is rendered in its **own X2 session** and X2 takes
+    no seed. Nothing in the renderer couples the two passes, so there is no structural
+    reason for them to agree, and when they do not the policy is being fed two
+    contradictory worlds in the same observation. That is not a weaker version of a
+    finding; it is an incoherent stimulus, and no situation name can describe it.
+
+    Returns `(None, ...)` when there is nothing to compare - one camera, or a camera
+    whose judge call failed. Unknown is reported as unknown, never as agreement.
+    """
+    usable = {v: d for v, d in per_view.items()
+              if d.get("observed") and not d.get("error")}
+    if len(usable) < 2:
+        return None, ("only one camera produced a description, so cross-camera "
+                      "coherence could not be assessed")
+
+    # Decided here rather than by the model: "one camera changed and the other did not"
+    # is disagreement about whether an event occurred at all, which needs no judgement
+    # of wording. Leaving it to the LLM cost two undetermined verdicts on the first
+    # audit, including a render where one camera reported no visible difference.
+    blank = {v for v, d in usable.items() if d.get("verdict") == "not_applied"}
+    if blank and len(blank) < len(usable):
+        changed = sorted(set(usable) - blank)
+        return False, (
+            f"the cameras disagree about whether anything happened: "
+            f"{', '.join(sorted(blank))} shows no visible change while "
+            f"{', '.join(changed)} does. The policy reads both, so its two views "
+            f"contradict each other."
+        )
+
+    described = "\n".join(f"  {v}: {d['observed']}" for v, d in usable.items())
+    payload = {
+        "contents": [{"parts": [
+            {"text": COHERENCE_INSTRUCTIONS.format(descriptions=described)}
+        ]}],
+        # 2048, matching the judge: this model emits reasoning tokens before its answer,
+        # and a tight cap truncates the JSON mid-string. That read as a parse failure
+        # and silently produced "undetermined" rather than a verdict.
+        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 2048},
+    }
+    try:
+        doc = _parse(_call(payload, timeout=60.0, attempts=2))
+    except Exception as exc:  # noqa: BLE001
+        log.info("coherence check failed: %s", exc)
+        return None, f"coherence check unavailable ({type(exc).__name__})"
+
+    coherent = bool(doc.get("coherent"))
+    if coherent:
+        shared = str(doc.get("shared_change", "")).strip()
+        return True, (f"both cameras show the same change: {shared}" if shared
+                      else "both cameras describe the same change")
+    disagreement = str(doc.get("disagreement", "")).strip()
+    return False, (
+        "the cameras show different changes, so the policy's two views disagree about "
+        "what happened to the scene"
+        + (f": {disagreement}" if disagreement else "")
+    )
+
+
 def judge_views(
     prompt: str,
     situation: str,
     source_frames: dict,
     perturbed_frames: dict,
     views,
+    *,
+    coherence: bool = True,
 ) -> IntentVerdict:
-    """Adjudicate every perturbed camera and return the *weakest* verdict.
+    """Adjudicate every perturbed camera, keep each verdict, and check they agree.
 
-    Weakest, not best: a situation is only credible if it is visible on the cameras the
-    policy is actually reading. Taking the best camera would let one lucky render
-    launder a name across the rest.
+    The merged verdict is the *weakest*, not the best: a situation is only credible if
+    it is visible on the cameras the policy is actually reading, and taking the best
+    camera would let one lucky render launder a name across the rest.
+
+    Each camera's own verdict is retained in `per_view` rather than discarded, both
+    because the cross-camera check needs it and because "2 of 2 cameras agree" was
+    previously reported for two cameras that agreed only on the *label*
+    `something_else` while showing entirely different somethings.
     """
     order = {v: i for i, v in enumerate(VERDICTS)}
     verdicts = []
@@ -200,17 +317,33 @@ def judge_views(
                                      perturbed_frames[v], view=v))
     if not verdicts:
         return IntentVerdict(verdict="unknown", error="no views to judge")
+
     worst = max(verdicts, key=lambda r: order.get(r.verdict, len(VERDICTS)))
     worst.views_judged = [v for r in verdicts for v in r.views_judged]
+    worst.per_view = {
+        (r.views_judged[0] if r.views_judged else f"view{i}"): {
+            "verdict": r.verdict,
+            "observed": r.observed,
+            "note": r.note,
+            "added_objects": r.added_objects,
+            "confidence": round(r.confidence, 2),
+            "error": r.error,
+        }
+        for i, r in enumerate(verdicts)
+    }
     # Union, not the worst camera's list: an object invented on any camera the policy
     # reads is in the policy's input, whatever the other cameras show.
-    seen = []
+    seen: list[str] = []
     for r in verdicts:
         for o in r.added_objects:
             if o.lower() not in {x.lower() for x in seen}:
                 seen.append(o)
     worst.added_objects = seen
+
     if len(verdicts) > 1:
         agree = sum(1 for r in verdicts if r.verdict == worst.verdict)
-        worst.note = f"{worst.note} ({agree}/{len(verdicts)} cameras agree)".strip()
+        worst.note = (f"{worst.note} ({agree}/{len(verdicts)} cameras agree on the "
+                      f"verdict label)").strip()
+        if coherence:
+            worst.coherent, worst.coherence_note = check_coherence(worst.per_view)
     return worst

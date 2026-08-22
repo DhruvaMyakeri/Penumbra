@@ -39,6 +39,7 @@ import json
 import logging
 
 from .director import CAPABILITIES, _call
+from .insights import rule_violations
 
 log = logging.getLogger("penumbra.render_agent")
 
@@ -57,7 +58,7 @@ WHAT HAS BEEN TRIED, AND WHAT WENT WRONG:
 
 {capabilities}
 
-The three ways a prompt fails, and what to do about each:
+The four ways a prompt fails, and what to do about each:
 
   NOTHING HAPPENED     The model returned the scene essentially unchanged. The prompt
                        was too mild or too abstract. Make it drastic and concrete: name
@@ -72,16 +73,38 @@ The three ways a prompt fails, and what to do about each:
                        than a splash - and avoid anything that implies movement, steam,
                        droplets, or particles in the air.
 
-  WRONG THING RENDERED The model produced a different change, or invented objects. Name
-                       the surfaces and objects that are ALREADY in the scene and say
-                       how they now look. Never phrase anything as adding, placing,
-                       replacing or introducing an object, and never mention an object
-                       that is not already visible.
+  WRONG THING RENDERED The model produced a different change, or invented objects. The
+                       single most effective repair is measured and mechanical: CUT THE
+                       NUMBER OF NAMED OBJECTS TO ONE. Choose the one object the
+                       situation is really about and describe only that. Do not mention
+                       the others at all, even in passing, even as scenery - naming a
+                       second object doubles the chance the model draws a duplicate.
+
+  CAMERAS DISAGREED    Two cameras were rendered in separate passes and produced
+                       different scenes - one saw a spill, the other saw a new object,
+                       or one saw nothing. The prompt left too much to the model's
+                       imagination, so the two draws went different ways. Repair it by
+                       removing choice: one object, one named colour or material, one
+                       sentence, no adjectives that could be interpreted several ways,
+                       nothing that implies an object the scene does not already have.
+                       A prompt that admits only one reading is one both passes can
+                       agree on.
+
+THE RULES THAT ARE NOT NEGOTIABLE - each is measured over 92 renders:
+
+  1. Name AT MOST ONE manipulable object (cup, bowl, gripper, container). One object:
+     36% chance of invention. Two: 73%. Three: 100%.
+  2. Never target a rim, edge, lip, handle, gripper finger, or the chips inside a cup.
+     0 of 10 such prompts produced a usable render. Whole objects and whole surfaces
+     only.
+  3. Never describe the camera, the lens, the frame or the image. This model edits the
+     scene, not the optics.
 
 Write ONE prompt, under 200 characters, present tense, describing how the scene looks.
 
 Reply with JSON only, no markdown fence:
 {{"prompt": "<the rewritten prompt>",
+  "objects_named": ["<each manipulable object your prompt names - aim for exactly one>"],
   "reasoning": "<one sentence on what you changed and why>"}}
 """
 
@@ -96,19 +119,22 @@ def _describe(attempt: dict) -> str:
     return "\n".join(lines)
 
 
-def revise_prompt(situation: str, why: str, attempts: list[dict]) -> tuple[str, str]:
-    """Rewrite the prompt in light of what the renderer actually did.
-
-    Returns (prompt, reasoning). Never raises: if the agent is unreachable the caller
-    keeps the prompt it had, which is the same behaviour as having no agent at all.
-    """
+def _ask(situation: str, why: str, attempts: list[dict], brief: str,
+         correction: str = "") -> tuple[str, str]:
+    """One call to the agent. Returns (prompt, reasoning); ("", reason) on failure."""
+    text = INSTRUCTIONS.format(
+        situation=situation or "(none given)",
+        why=why or "(none given)",
+        history="\n".join(_describe(a) for a in attempts),
+        capabilities=CAPABILITIES,
+    )
+    if brief:
+        text += f"\n\nWHAT THIS RUN HAS LEARNED ABOUT THE RENDERER SO FAR:\n{brief}"
+    if correction:
+        text += (f"\n\nYOUR PREVIOUS ANSWER BROKE A RULE AND WAS NOT USED:\n"
+                 f"{correction}\nWrite it again, obeying every rule this time.")
     payload = {
-        "contents": [{"parts": [{"text": INSTRUCTIONS.format(
-            situation=situation or "(none given)",
-            why=why or "(none given)",
-            history="\n".join(_describe(a) for a in attempts),
-            capabilities=CAPABILITIES,
-        )}]}],
+        "contents": [{"parts": [{"text": text}]}],
         "generationConfig": {"temperature": 0.4, "maxOutputTokens": 2048},
     }
     try:
@@ -126,6 +152,44 @@ def revise_prompt(situation: str, why: str, attempts: list[dict]) -> tuple[str, 
         return "", f"{type(exc).__name__}: {exc}"
 
 
+def revise_prompt(situation: str, why: str, attempts: list[dict],
+                  brief: str = "") -> tuple[str, str]:
+    """Rewrite the prompt in light of what the renderer actually did.
+
+    Returns (prompt, reasoning). Never raises: if the agent is unreachable the caller
+    keeps the prompt it had, which is the same behaviour as having no agent at all.
+
+    The agent's answer is **checked against the measured rules before it is used**, and
+    a violating prompt is sent back once with the specific violation quoted. Telling a
+    model a rule and then not enforcing it is how the last suite ended up with eleven
+    two-object prompts despite the guidance already saying not to: the instruction was
+    there, nothing verified it, and a spent render is not the place to discover the
+    rule was ignored. If the second answer still violates, the better of the two is
+    returned with the violation recorded, because a rule-breaking prompt that renders
+    is still worth more than no attempt at all.
+    """
+    prompt, reasoning = _ask(situation, why, attempts, brief)
+    if not prompt:
+        return "", reasoning
+
+    violations = rule_violations(prompt)
+    if not violations:
+        return prompt, reasoning
+
+    retry, retry_reasoning = _ask(
+        situation, why, attempts, brief,
+        correction="\n".join(f"  - {v}" for v in violations),
+    )
+    if retry and not rule_violations(retry):
+        return retry, f"{retry_reasoning} (rewritten after breaking: {violations[0]})"
+
+    kept, kept_reason = (retry, retry_reasoning) if retry else (prompt, reasoning)
+    remaining = rule_violations(kept)
+    log.info("render agent prompt still breaks %d rule(s): %s",
+             len(remaining), "; ".join(remaining)[:160])
+    return kept, f"{kept_reason} [WARNING: still breaks {len(remaining)} measured rule(s)]"
+
+
 def classify(gate: dict | None, intent: dict | None, declined: bool) -> tuple[str, str]:
     """Turn the two checks into one outcome the agent can act on.
 
@@ -138,6 +202,15 @@ def classify(gate: dict | None, intent: dict | None, declined: bool) -> tuple[st
     if gate is not None and not gate.get("valid", True):
         return "SCENE CORRUPTED", "; ".join(gate.get("reasons") or ["gate rejected it"])
     if intent:
+        # Checked before the verdict, because incoherence is the more fundamental
+        # failure: when the cameras disagree there is no single render to have an
+        # opinion about, and "applied" on the luckier camera is not the situation the
+        # policy was shown.
+        if intent.get("coherent") is False:
+            bits = [intent.get("coherence_note") or "the cameras rendered different scenes"]
+            for view, d in (intent.get("per_view") or {}).items():
+                bits.append(f"{view}: {d.get('observed', '')}")
+            return "CAMERAS DISAGREED", " | ".join(b for b in bits if b)
         verdict = intent.get("verdict")
         if verdict in ("not_applied", "something_else"):
             bits = [f"a vision model judged the render '{verdict}'"]
@@ -148,3 +221,10 @@ def classify(gate: dict | None, intent: dict | None, declined: bool) -> tuple[st
                             + ", ".join(intent["added_objects"]))
             return "WRONG THING RENDERED", ". ".join(bits)
     return "usable", ""
+
+
+#: Which outcomes a rewritten prompt can plausibly repair. `SCENE CORRUPTED` is here
+#: because a stiller phrasing genuinely fixes it; `CAMERAS DISAGREED` because a prompt
+#: admitting only one reading gives two independent draws less room to diverge.
+REPAIRABLE = ("NOTHING HAPPENED", "SCENE CORRUPTED", "WRONG THING RENDERED",
+              "CAMERAS DISAGREED")

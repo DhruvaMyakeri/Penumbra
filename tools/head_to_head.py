@@ -107,6 +107,11 @@ async def main() -> None:
     ap.add_argument("--baseline-runs", type=int, default=6)
     ap.add_argument("--rmse", type=float, default=None,
                     help="override the target perceptual distance")
+    ap.add_argument("--only", default=None,
+                    help="comma-separated subset of classical ops to run")
+    ap.add_argument("--into", type=Path, default=None,
+                    help="merge into an existing headtohead run instead of starting a "
+                         "new one, keeping the ops it already measured")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO,
@@ -125,6 +130,19 @@ async def main() -> None:
     distances = [s["distance"]["rmse"] for s in hits if s.get("distance")]
     target = args.rmse if args.rmse is not None else float(statistics.median(distances))
 
+    # Resuming: the surviving ops were strength-matched to the *old* target, so adopting
+    # it is not a convenience — mixing two target distances in one table would make the
+    # arms incomparable, which is the one thing this comparison exists to avoid.
+    prior: list[dict] = []
+    if args.into:
+        existing = json.loads((args.into / "head_to_head.json").read_text(encoding="utf-8"))
+        prior = existing.get("classical") or []
+        if abs(existing["target_rmse"] - target) > 1e-6:
+            log.warning("adopting the existing run's target rmse %.5f (this invocation "
+                        "would have used %.5f) so all ops share one distance",
+                        existing["target_rmse"], target)
+        target = float(existing["target_rmse"])
+
     print(f"\ngenerative arm ({args.src_run.name}), {len(hits)} confirmed:")
     for s in hits:
         c = s.get("vs_control") or {}
@@ -140,11 +158,22 @@ async def main() -> None:
     runner = ExperimentRunner(policy=CosmosDroidPolicy(chunk=args.chunk))
     await runner.calibrate(episode, runs=args.baseline_runs)
 
-    out = RUNS_DIR / f"headtohead-ep{args.episode}-{time.strftime('%Y%m%d-%H%M%S')}"
+    out = args.into or (
+        RUNS_DIR / f"headtohead-ep{args.episode}-{time.strftime('%Y%m%d-%H%M%S')}"
+    )
     out.mkdir(parents=True, exist_ok=True)
 
     ops = [o for o in CLASSICAL_OPS if o not in POSITIVE_CONTROLS]
-    records: list[dict] = []
+    if args.only:
+        wanted = [o.strip() for o in args.only.split(",") if o.strip()]
+        unknown = [o for o in wanted if o not in ops]
+        if unknown:
+            raise SystemExit(f"unknown classical op(s): {', '.join(unknown)}. "
+                             f"available: {', '.join(ops)}")
+        ops = wanted
+    # Whatever this invocation measures replaces the prior record for the same op; the
+    # rest carry through, so the verdict is always computed over the full table.
+    records: list[dict] = [r for r in prior if r["op"] not in ops]
     report = {
         "source_run": args.src_run.name,
         "episode": episode.episode_id,
@@ -194,6 +223,8 @@ async def main() -> None:
         flush()
 
     # -- verdict ---------------------------------------------------------------
+    order = list(CLASSICAL_OPS)
+    records.sort(key=lambda r: order.index(r["op"]) if r["op"] in order else 99)
     admissible = [r for r in records if not r["rejected"] and r["matched"]]
     classical_wins = [r for r in admissible if r["significant"]]
     gen_effects = [g["effect_size"] for g in report["generative"] if g["effect_size"]]
@@ -210,12 +241,28 @@ async def main() -> None:
             f"control. The distinction is in the KIND of change, not its size."
         )
     else:
+        # Two questions, and conflating them would misreport the result in whichever
+        # direction happened to be convenient. (a) Does a free operator reach
+        # significance at the same perceptual distance? If yes, "generative finds what
+        # classical cannot" is falsified as stated, full stop. (b) How large is the
+        # effect it reaches? A significant d = 0.2 and a significant d = 2.0 are not the
+        # same discovery. Both go in the verdict.
+        #
+        # The effect sizes are only roughly comparable: each arm is standardised by the
+        # spread of its own control, and the controls differ by design (see the header).
+        gm = float(np.median(gen_effects)) if gen_effects else float("nan")
+        cm = max(r["effect_size"] for r in classical_wins)
         verdict = (
-            f"NO GENERATIVE ADVANTAGE DEMONSTRATED. {len(classical_wins)} of "
-            f"{len(admissible)} matched classical ops also moved the policy "
-            f"({', '.join(r['op'] for r in classical_wins)}). At this perceptual "
-            f"distance the free alternative finds the same thing, so the generative "
-            f"pipeline is not yet earning its cost on this episode."
+            f"NO GENERATIVE ADVANTAGE DEMONSTRATED AT THE SIGNIFICANCE LEVEL. "
+            f"{len(classical_wins)} of {len(admissible)} matched classical ops also "
+            f"moved the policy ({', '.join(r['op'] for r in classical_wins)}), so the "
+            f"claim that generative perturbation finds what classical augmentation "
+            f"cannot is FALSIFIED as stated on this episode. Magnitude is a separate "
+            f"question and the two answers differ: the strongest admissible classical "
+            f"effect is d = {cm:+.2f} against a generative median of d = {gm:+.2f}. "
+            f"Effect sizes are standardised against each arm's own control and so are "
+            f"comparable only roughly. What survives is a weaker claim - larger "
+            f"behavioural effect at equal perceptual distance - not a unique one."
         )
     report["verdict"] = verdict
     report["summary"] = {

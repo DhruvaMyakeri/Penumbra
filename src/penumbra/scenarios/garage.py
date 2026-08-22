@@ -47,10 +47,23 @@ from ..experiments.runner import ExperimentRunner
 from ..perturbation.spec import FaultSpec, Rung
 from ..perturbation.x2 import X2Perturbation
 from ..policy.base import PolicyTrace
+from ..report.run_report import write_reports
 from ..validation.seam import SeamGate, perceptual_distance
 from .director import Scenario, propose_suite
+from .insights import InsightLedger, RenderObservation, prompt_features, rule_violations
 from .judge import judge_views
-from .render_agent import classify, revise_prompt
+from .render_agent import REPAIRABLE, classify, revise_prompt
+
+#: The render agent's outcome labels, as the ledger records them. Kept as an explicit
+#: map rather than a lowercase() so that renaming an outcome breaks loudly here instead
+#: of silently splitting the ledger's counts across two spellings.
+_LEDGER_OUTCOME = {
+    "NOTHING HAPPENED": "declined",
+    "SCENE CORRUPTED": "gate_rejected",
+    "WRONG THING RENDERED": "wrong_thing",
+    "CAMERAS DISAGREED": "incoherent",
+    "usable": "usable",
+}
 
 log = logging.getLogger("penumbra.garage")
 
@@ -109,19 +122,77 @@ class ScenarioResult:
     passes_bonferroni: bool | None = None
 
     @property
-    def is_vulnerability(self) -> bool:
-        """A discovery: separated from the no-op AND survived suite-wide correction.
+    def moved_the_policy(self) -> bool:
+        """Statistically separated from the no-op AND survived suite-wide correction.
 
         Raw significance is not enough once a suite runs twenty-odd tests against one
         control - at that size, chance alone produces apparent hits. `passes_fdr` is
         set by the suite-level correction after every scenario has been tested; until
         then a scenario can be significant without yet being a discovery.
+
+        This is a statement about numbers only. It says nothing about *what* moved the
+        policy, which is what `finding_class` is for.
         """
         if self.status != "done" or self.vs_control is None:
             return False
         if not self.vs_control.any_significant:
             return False
         return self.passes_fdr is not False
+
+    @property
+    def finding_class(self) -> str:
+        """What this run is entitled to claim about this situation.
+
+        The distinction this draws is the one the project kept getting wrong. A suite
+        previously reported 15 vulnerabilities; an independent judge said 3 of the 15
+        renders showed the situation they were named after, and a cross-camera audit
+        found 14 of them showed *different scenes on the two cameras*. Every one of
+        those numbers was statistically sound. The names were fiction.
+
+        Statistical significance earns the right to say "something in this render moved
+        the policy". It does not earn the right to say *what*. Only a render that the
+        gate accepted, that both cameras agree on, and that an independent judge says
+        depicts the named situation earns that.
+
+            CONFIRMED     the policy moved, and the render shows what it claims
+            UNATTRIBUTED  the policy moved, but the render does not show what it claims
+                          (wrong thing rendered, or the cameras disagreed). A real
+                          effect with an unsupported cause - never quote the name.
+            NO EFFECT     tested, did not move the policy beyond re-rendering
+            REJECTED      the render corrupted the scene; says nothing about the policy
+            DECLINED      the editor produced no visible change; never tested
+        """
+        if self.status == "no_change":
+            return "DECLINED"
+        if self.status == "rejected":
+            return "REJECTED"
+        if self.status == "error":
+            return "ERROR"
+        if self.status != "done":
+            return "PENDING"
+        if not self.moved_the_policy:
+            return "NO EFFECT"
+        intent = self.intent or {}
+        # No judge verdict at all is not evidence of a good render. Absent adjudication
+        # the name is unsupported in exactly the way it would be if the judge objected,
+        # so it lands in the same bucket rather than being waved through.
+        if not intent or intent.get("error"):
+            return "UNATTRIBUTED"
+        if intent.get("coherent") is False:
+            return "UNATTRIBUTED"
+        if not intent.get("credible"):
+            return "UNATTRIBUTED"
+        return "CONFIRMED"
+
+    @property
+    def is_vulnerability(self) -> bool:
+        """Retained for the record format's stability; prefer `finding_class`.
+
+        This is `moved_the_policy` - the statistical fact alone. It is deliberately NOT
+        the headline any more: counting these as vulnerabilities is what produced a
+        suite claiming fifteen findings of which three survived adjudication.
+        """
+        return self.moved_the_policy
 
     def verdict(self) -> str:
         if self.status == "no_change":
@@ -147,21 +218,37 @@ class ScenarioResult:
                 which.append(f"trajectory (p={c.p_value:.4f}, d={c.effect_size:+.2f})")
             if c.significant_gripper:
                 which.append(f"grasp decision (p={c.gripper_p_value:.4f})")
-            verdict = ("VULNERABILITY - policy behaviour separates from a no-op "
-                       "re-render of the same episode: " + " and ".join(which))
-            # The statistics stand on their own; the situation's NAME does not. If an
-            # independent judge says the render shows something other than what was
-            # asked for, the effect is still real but "amber lighting broke it" is not
-            # a claim this run can make, and the card has to say so where the claim is.
-            if self.intent and not self.intent.get("credible", True):
-                observed = str(self.intent.get("observed", "")).rstrip(".")
-                verdict += (
-                    f" | BUT THE NAME IS NOT SUPPORTED: an independent vision model "
-                    f"judged the render '{self.intent.get('verdict')}'"
+            moved = ("policy behaviour separates from a no-op re-render of the same "
+                     "episode: " + " and ".join(which))
+            intent = self.intent or {}
+            klass = self.finding_class
+
+            if klass == "CONFIRMED":
+                return (f"CONFIRMED - {moved}. An independent vision model judged the "
+                        f"render '{intent.get('verdict')}' and both cameras agree on "
+                        f"what changed, so the situation's name is supported by the "
+                        f"render the policy actually saw.")
+
+            # The statistics stand on their own; the situation's NAME does not. Say
+            # precisely which of the two ways the attribution failed, because they call
+            # for different fixes - a rewording, or a redraw.
+            if intent.get("coherent") is False:
+                note = (intent.get("coherence_note")
+                        or "the two cameras rendered different scenes")
+                return (f"UNATTRIBUTED - {moved}. BUT THE CAMERAS DISAGREE: {note}. The "
+                        f"policy read both views in the same observation, so it was "
+                        f"shown two different worlds and no single situation describes "
+                        f"its input. The effect is real; '{self.scenario.name}' is not "
+                        f"what caused it.")
+            if not intent or intent.get("error"):
+                return (f"UNATTRIBUTED - {moved}. No adjudication of what the render "
+                        f"shows was available, so nothing supports the name.")
+            observed = str(intent.get("observed", "")).rstrip(".")
+            return (f"UNATTRIBUTED - {moved}. BUT THE RENDER SHOWS SOMETHING ELSE: an "
+                    f"independent vision model judged it '{intent.get('verdict')}'"
                     + (f" - {observed}" if observed else "")
-                    + ". The behaviour change is real; its stated cause is not."
-                )
-            return verdict
+                    + f". The behaviour change is real; '{self.scenario.name}' is not "
+                      f"what caused it.")
         return (
             f"no effect beyond re-rendering (p={c.p_value:.4f}) - this situation did "
             f"not move the policy more than asking the model for nothing"
@@ -176,6 +263,8 @@ class ScenarioResult:
             "vs_control": self.vs_control.to_dict() if self.vs_control else None,
             "vs_baseline": self.vs_baseline.to_dict() if self.vs_baseline else None,
             "is_vulnerability": self.is_vulnerability,
+            "moved_the_policy": self.moved_the_policy,
+            "finding_class": self.finding_class,
             "verdict": self.verdict(),
             "seconds": round(self.seconds, 1),
             "error": self.error,
@@ -207,6 +296,7 @@ class Garage:
         screen_repeats: int = 3,
         gate_retries: int = 2,
         max_render_attempts: int = 3,
+        rebrief_after: int = 6,
         render_settings: dict | None = None,
         on_update: Callable[[dict], None] | None = None,
     ) -> None:
@@ -228,6 +318,11 @@ class Garage:
         #: How many times the render agent may rewrite the prompt and try again. Each
         #: attempt is a full render, so this multiplies the expensive half of a suite.
         self.max_render_attempts = max_render_attempts
+        #: After this many scenarios have rendered, the prompts of everything still
+        #: queued are rewritten with what the run has learned. Six is enough attempts
+        #: for a pattern to show and early enough that most of the suite benefits.
+        #: Zero disables it.
+        self.rebrief_after = rebrief_after
         #: How X2 is streamed. Defaults measured by `tools/tune_x2.py`: with a vivid
         #: prompt every configuration applied the edit, and this was the only one that
         #: came back applied, gate-valid and with nothing invented. That comparison is a
@@ -246,6 +341,10 @@ class Garage:
         # neither re-renders nor re-rolls what screening already paid for.
         self._episodes: dict = {}
         self._traces: dict = {}
+        #: What this run has learned about the renderer, shared by every agent in it.
+        #: Persisted next to the state so an interrupted run keeps its evidence, and so
+        #: a reader can audit what the agents were told at the time they were asked.
+        self.insights = InsightLedger(path=self.out / "insights.json")
 
     # -- state streaming ---------------------------------------------------
 
@@ -254,6 +353,7 @@ class Garage:
         self.state["scenarios"] = [r.to_dict() for r in self.results]
         self.state["updated"] = time.strftime("%H:%M:%S")
         self.state["cost"] = self.runner.cost
+        self.state["insights"] = self.insights.to_dict()["summary"]
         (self.out / "state.json").write_text(
             json.dumps(self.state, indent=2, default=str), encoding="utf-8"
         )
@@ -530,7 +630,24 @@ class Garage:
                     "gate": r["gate"],
                     "views": r["per_view_gate"],
                     "intent": r["intent"],
+                    "rule_violations": rule_violations(prompt),
                 })
+
+                # Into the shared ledger, so scenario 19 benefits from what scenarios
+                # 1-18 discovered about this renderer instead of repeating it.
+                intent = r["intent"] or {}
+                self.insights.record(RenderObservation(
+                    scenario=scenario.name,
+                    attempt=attempt,
+                    prompt=prompt,
+                    features=prompt_features(prompt),
+                    violations=rule_violations(prompt),
+                    outcome=_LEDGER_OUTCOME.get(outcome, "usable"),
+                    judge_verdict=intent.get("verdict", ""),
+                    invented=intent.get("added_objects") or [],
+                    gate_reasons=(r["gate"] or {}).get("reasons") or [],
+                    observed=intent.get("observed", ""),
+                ))
 
                 # Keep the record and the media current with the attempt just made, so
                 # an interrupted run still shows what it actually produced.
@@ -555,40 +672,32 @@ class Garage:
                 log.info("%s attempt %d: %s - %s", scenario.name, attempt, outcome,
                          outcome_detail[:120])
 
-                # Once the scene has survived the gate and something visibly changed,
-                # the only complaint left is the judge's - and that is not a failure a
-                # prompt can fix. Measured over one 21-situation suite: 44 attempts
-                # were spent after the gate had already passed, and the failure never
-                # migrated back. What blocks those renders is X2 replacing an object
-                # instead of resurfacing it, which no rewording addresses.
-                #
-                # So stop here and test the render, carrying the judge's verdict as the
-                # caveat it always was. This is not purely a saving: the situation is
-                # now tested on the render that first passed the gate rather than on a
-                # later draw, which is a different render.
-                if not r["declined"] and r["gate"]["valid"]:
-                    log.info("%s: gate satisfied; the judge's objection is not a "
-                             "prompt problem, so testing this render", scenario.name)
-                    res.status = "rendered"
-                    res.stage = "awaiting screening"
-                    self._episodes[scenario.name] = r["rendered"]
-                    break
-
+                # An earlier version stopped here whenever the gate had passed, on the
+                # argument that the judge's objection was not a failure a prompt could
+                # fix. That argument has since been tested and is wrong. Prompts obeying
+                # the measured structural rules render correctly 39% of the time against
+                # 18% for the rest (n=92), and of the two renders in the last suite whose
+                # cameras agreed with each other, both came from rule-clean prompts while
+                # all fourteen rule-breaking ones disagreed. The judge's objection is
+                # frequently a prompt problem, so the loop keeps working.
                 last_attempt = attempt == self.max_render_attempts
                 new_prompt, reasoning = ("", "")
-                if not last_attempt:
+                if not last_attempt and outcome in REPAIRABLE:
                     self._publish(
                         phase_detail=f"rewriting the prompt for {scenario.name}")
                     new_prompt, reasoning = revise_prompt(
-                        scenario.situation, scenario.why_it_might_break, history)
+                        scenario.situation, scenario.why_it_might_break, history,
+                        brief=self.insights.brief())
                     history[-1]["agent_reasoning"] = reasoning
 
                 if last_attempt or not new_prompt or new_prompt == prompt:
                     # Out of attempts, or the agent had nothing new to try. A gate
-                    # rejection or a decline is final. A render the judge merely
-                    # disbelieves is still tested - the judge is an opinion and the
-                    # statistics are not, so its verdict travels with the result
-                    # instead of suppressing it.
+                    # rejection or a decline is final and nothing is tested. A render
+                    # the judge merely disbelieves - or whose cameras disagreed - IS
+                    # still tested, because the judge is an opinion and the statistics
+                    # are not. What changes is the claim the result is allowed to make:
+                    # `finding_class` demotes it to UNATTRIBUTED so the effect is
+                    # reported without the situation's name attached to it.
                     if r["declined"]:
                         res.status = "no_change"
                     elif not r["gate"]["valid"]:
@@ -607,6 +716,56 @@ class Garage:
         res.seconds = time.time() - t0
         self._publish()
         return res
+
+    async def _rebrief(self, episode: Episode) -> None:
+        """Rewrite the prompts of situations not yet rendered, using what has been learned.
+
+        The director commits to every prompt before a single frame exists. By the time
+        the sixth situation has rendered, the run knows things the director could not
+        have known - that this renderer keeps inventing bowls today, that a phrasing
+        which worked in a previous suite is being declined in this one - and there is no
+        reason the remaining fifteen situations should repeat the mistake.
+
+        The SITUATIONS are untouched. Only the prompts are rewritten, and only for
+        scenarios that have not run. Re-choosing what to test after seeing which tests
+        are working is fishing; re-choosing how to phrase a fixed test is instrument
+        operation. That line is the same one `run_scenario` draws per scenario, applied
+        across the suite.
+
+        Best-effort: a failure here leaves the original prompts in place.
+        """
+        pending = [r for r in self.results if r.status == "queued"]
+        if not pending or not self.insights.observations:
+            return
+        self._publish(phase="rendering",
+                      phase_detail=f"re-briefing the director on {len(pending)} "
+                                   f"remaining situations")
+        brief = self.insights.brief()
+        rewritten = 0
+        for res in pending:
+            history = [{"attempt": 0, "prompt": res.scenario.prompt,
+                        "outcome": "NOT YET ATTEMPTED",
+                        "detail": "rewrite this prompt using what the run has learned "
+                                  "about the renderer, keeping the situation identical"}]
+            new_prompt, reasoning = revise_prompt(
+                res.scenario.situation, res.scenario.why_it_might_break, history,
+                brief=brief)
+            if new_prompt and new_prompt != res.scenario.prompt:
+                res.render_attempts = [{
+                    "attempt": 0, "prompt": res.scenario.prompt,
+                    "outcome": "REWRITTEN BEFORE RENDERING",
+                    "detail": f"re-briefed after {len(self.insights.observations)} "
+                              f"render attempts elsewhere in this suite",
+                    "agent_reasoning": reasoning,
+                }]
+                res.scenario.prompt = new_prompt
+                rewritten += 1
+        self.insights.note(
+            "director",
+            f"re-briefed {rewritten} of {len(pending)} pending situations after "
+            f"{len(self.insights.observations)} render attempts")
+        log.info("re-brief: rewrote %d of %d pending prompts", rewritten, len(pending))
+        self._publish()
 
     async def test_scenario(self, res: ScenarioResult, *, repeats: int,
                             stage: str) -> ScenarioResult:
@@ -670,7 +829,6 @@ class Garage:
         self._publish(noise_floor=nf.to_dict())
 
         self._publish(phase="director", phase_detail="proposing situations for this task")
-        per_category = max(1, -(-n_scenarios // 7))  # ceil over the category count
 
         def _director_progress(category, scenarios, n_categories):
             self.results = [ScenarioResult(scenario=s, status="queued")
@@ -700,8 +858,12 @@ class Garage:
                                        f"previous run of this directory")
             self.resume(episode)
         else:
+            # `total`, not a flat per-category count: the categories carry measured
+            # weights, and asking for 21 situations should spend them where findings
+            # have actually come from rather than three per category regardless.
             proposal = propose_suite(task, {v: episode.frames[v][0] for v in self.views},
-                                     per_category=per_category,
+                                     total=n_scenarios,
+                                     brief=self.insights.brief(),
                                      on_progress=_director_progress)
             if proposal.error:
                 self._publish(phase="error", error=f"director: {proposal.error}")
@@ -711,9 +873,16 @@ class Garage:
             # this specific task, and waiting until each one finishes hides it.
             chosen = proposal.scenarios[:n_scenarios]
             self.results = [ScenarioResult(scenario=c, status="queued") for c in chosen]
-            self._publish(director={"model": chosen[0].source if chosen else None,
-                                    "proposed": len(proposal.scenarios),
-                                    "categories": sorted({c.category for c in chosen})})
+            self._publish(director={
+                "model": chosen[0].source if chosen else None,
+                "proposed": len(proposal.scenarios),
+                "categories": sorted({c.category for c in chosen}),
+                # How often the director's own prompts broke the measured rules and had
+                # to be sent back. A rising number here is the signal that the briefing
+                # is not landing, which is otherwise invisible until the renders fail.
+                "prompt_repairs": proposal.repairs,
+                "still_violating": [c.name for c in chosen if c.rule_violations],
+            })
 
         await self.establish_control(episode)
 
@@ -721,10 +890,12 @@ class Garage:
         # removes corrupted renders from the family before any test is run.
         self._publish(phase="rendering",
                       phase_detail=f"rendering {len(chosen)} situations")
-        for result in list(self.results):
+        for i, result in enumerate(list(self.results)):
             if result.status != "queued":
                 continue  # restored from a previous run of this directory
             await self.run_scenario(episode, result)
+            if i + 1 == self.rebrief_after:
+                await self._rebrief(episode)
 
         renderable = [r for r in self.results if r.status == "rendered"]
 
@@ -748,27 +919,67 @@ class Garage:
 
         self._apply_correction()
 
-        found = [r for r in self.results if r.is_vulnerability]
+        by_class: dict[str, list] = {}
+        for r in self.results:
+            by_class.setdefault(r.finding_class, []).append(r.scenario.name)
+        confirmed = by_class.get("CONFIRMED", [])
+        unattributed = by_class.get("UNATTRIBUTED", [])
+
+        # The headline is CONFIRMED, not "moved the policy". Those two numbers came
+        # apart badly once - 15 reported against 3 that survived adjudication - and the
+        # count a reader sees first has to be the one the evidence supports.
+        detail = (f"{len(confirmed)} confirmed of {len(renderable)} tested situations")
+        if unattributed:
+            detail += (f"; {len(unattributed)} more moved the policy but the render "
+                       f"does not support their name")
         self._publish(
             phase="done",
-            phase_detail=f"{len(found)} of {len(renderable)} tested situations moved "
-                         f"the policy after correction",
+            phase_detail=detail,
             summary={
                 "proposed": len(self.results),
                 "rendered_valid": len(renderable),
                 "tested": len([r for r in self.results if r.vs_control is not None]),
-                "vulnerabilities": [r.scenario.name for r in found],
-                "rejected_renders": [r.scenario.name for r in self.results
-                                     if r.status == "rejected"],
+                # The headline. A situation whose render the gate accepted, whose two
+                # cameras agree, and which an independent judge says depicts what it
+                # claims - and which then moved the policy.
+                "confirmed": confirmed,
+                # Real, correction-surviving effects whose CAUSE is not established.
+                # Reported in full and never folded into the headline: quoting one of
+                # these by name is the specific dishonesty this split exists to prevent.
+                "unattributed": unattributed,
+                "unattributed_reasons": {
+                    r.scenario.name: (
+                        "cameras rendered different scenes"
+                        if (r.intent or {}).get("coherent") is False
+                        else f"render judged '{(r.intent or {}).get('verdict', 'unjudged')}'"
+                    )
+                    for r in self.results if r.finding_class == "UNATTRIBUTED"
+                },
+                "no_effect": by_class.get("NO EFFECT", []),
+                "rejected_renders": by_class.get("REJECTED", []),
                 # Renders the editor declined to make. Reported separately from
                 # rejections: a rejection means the render was corrupt, this means
                 # there was no render to speak of, and conflating them would read as
                 # the gate being stricter than it is.
-                "no_change_renders": [r.scenario.name for r in self.results
-                                      if r.status == "no_change"],
-                "errors": [r.scenario.name for r in self.results if r.status == "error"],
+                "no_change_renders": by_class.get("DECLINED", []),
+                "errors": by_class.get("ERROR", []),
+                # Retained so older readers of this record keep working, and so the gap
+                # between the two counts is visible rather than quietly closed.
+                "moved_the_policy": [r.scenario.name for r in self.results
+                                     if r.moved_the_policy],
             },
         )
+
+        # Readable output, written last so it reflects the corrected verdicts. Never
+        # allowed to sink a finished run: the evidence is already on disk in
+        # state.json, and losing a suite to a formatting bug would be absurd.
+        try:
+            written = write_reports(self.out, self.state)
+            self._publish(reports=written)
+            log.info("wrote %s and %d situation reports",
+                     Path(written["run_report"]).name, len(written["scenario_reports"]))
+        except Exception:  # noqa: BLE001
+            log.exception("could not write reports")
         return self.state
 
     def _apply_correction(self) -> None:
