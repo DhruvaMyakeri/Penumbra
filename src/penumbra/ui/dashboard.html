@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PENUMBRA — garage</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* A lab console, deliberately single-theme: this is read in a dim room beside a
+   terminal, and a light variant would only make it harder to compare two dark video
+   strips. Every colour is painted explicitly so nothing is inherited from the host. */
+:root{
+  --ground:#0B0C0F; --surface:#14161B; --sunk:#191C23; --rule:#272B34;
+  --ink:#EAEAF0; --dim:#969CAA; --faint:#69707E;
+  --accent:#4FB3A8; --accent-dim:#0F2E2B;
+  --hit:#E0A050; --hit-dim:#33261A;
+  --bad:#DE7477; --bad-dim:#331E1F;
+  --ok:#6FB97E; --ok-dim:#18291B;
+}
+*{box-sizing:border-box}
+html,body{background:var(--ground)}
+body{margin:0;color:var(--ink);font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,monospace;
+  font-size:13px;line-height:1.55;-webkit-font-smoothing:antialiased}
+h1,h2,h3,.name,.k{font-family:"Bricolage Grotesque",system-ui,sans-serif}
+.wrap{max-width:1200px;margin:0 auto;padding:26px 22px 80px}
+a{color:var(--accent)}
+
+header{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;
+  flex-wrap:wrap;border-bottom:1px solid var(--rule);padding-bottom:16px;margin-bottom:18px}
+h1{font-size:22px;font-weight:800;letter-spacing:.18em;margin:0}
+.tagline{color:var(--faint);font-size:11px;letter-spacing:.06em;margin-top:3px}
+.sub{color:var(--dim);margin-top:7px;font-size:12px}
+.cams{margin-top:5px;font-size:11px;color:var(--faint)}
+.cams b{color:var(--accent);font-weight:500}
+.cams i{color:var(--dim);font-style:normal}
+.live{display:flex;align-items:center;gap:8px;color:var(--accent);font-size:11px;
+  letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none}
+.pulsing{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.2}}
+
+.rail{display:flex;gap:1px;background:var(--rule);border:1px solid var(--rule);
+  border-radius:3px;overflow:hidden;margin-bottom:18px}
+.step{background:var(--surface);padding:10px 13px;flex:1;min-width:100px}
+.step .k{font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint)}
+.step .s{font-size:12px;margin-top:3px;color:var(--faint)}
+.step.on{background:var(--accent-dim)}
+.step.on .k,.step.on .s{color:var(--accent)}
+.step.past .s{color:var(--dim)}
+
+.phase{background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+  padding:12px 15px;margin-bottom:20px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.phase .k{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.phase .v{font-size:14px}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(126px,1fr));gap:1px;
+  background:var(--rule);border:1px solid var(--rule);border-radius:3px;overflow:hidden;
+  margin-bottom:20px}
+.cell{background:var(--surface);padding:12px 14px}
+.cell .k{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.cell .v{font-size:20px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums}
+.cell.hi .v{color:var(--hit)}
+
+h2{font-size:10.5px;letter-spacing:.17em;text-transform:uppercase;color:var(--faint);
+  margin:26px 0 11px;font-weight:600}
+
+.headline{border:1px solid var(--hit);background:var(--hit-dim);border-radius:3px;
+  padding:16px 18px;margin-bottom:20px}
+.headline .t{font-family:"Bricolage Grotesque",sans-serif;font-size:17px;font-weight:700;
+  color:var(--hit);margin-bottom:6px;text-wrap:balance}
+.headline ul{margin:9px 0 0;padding-left:18px;color:var(--ink)}
+.headline li{margin-bottom:3px}
+.headline .fine{color:var(--dim);font-size:11.5px;margin-top:10px}
+
+.chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}
+.chip{background:var(--sunk);border:1px solid var(--rule);color:var(--dim);
+  border-radius:2px;padding:5px 10px;font:inherit;font-size:11px;cursor:pointer}
+.chip[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+.chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.card{background:var(--surface);border:1px solid var(--rule);border-left-width:2px;
+  border-radius:3px;padding:15px 16px;margin-bottom:11px}
+.card.hit{border-left-color:var(--hit)}
+.card.clear{border-left-color:var(--ok)}
+.card.rej{border-left-color:var(--bad)}
+.card.busy{border-left-color:var(--accent)}
+.card.wait{border-left-color:var(--rule)}
+.card-top{display:flex;justify-content:space-between;gap:12px;align-items:baseline;
+  flex-wrap:wrap;margin-bottom:8px}
+.name{font-size:15px;font-weight:700}
+.cat{color:var(--faint);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  margin-left:9px}
+.tag{font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;padding:3px 8px;
+  border-radius:2px;border:1px solid currentColor;white-space:nowrap}
+.t-hit{color:var(--hit);background:var(--hit-dim)}
+.t-ok{color:var(--ok);background:var(--ok-dim)}
+.t-bad{color:var(--bad);background:var(--bad-dim)}
+.t-busy{color:var(--accent);background:var(--accent-dim)}
+.t-wait{color:var(--faint);background:var(--sunk)}
+
+.situation{margin-bottom:5px}
+.why{color:var(--dim);font-size:12px;margin-bottom:10px}
+.prompt{color:var(--faint);font-size:11px;background:var(--sunk);padding:8px 10px;
+  border-radius:2px;margin-bottom:10px;word-break:break-word}
+.verdict{font-size:12.5px;padding:9px 11px;border-radius:2px;margin-bottom:10px}
+.v-hit{background:var(--hit-dim);color:var(--hit)}
+.v-ok{background:var(--sunk);color:var(--dim)}
+.v-bad{background:var(--bad-dim);color:var(--bad)}
+
+.intent{font-size:12px;padding:9px 11px;border-radius:2px;margin-bottom:10px;
+  background:var(--sunk);border-left:2px solid var(--rule);color:var(--dim)}
+.intent.bad{border-left-color:var(--bad)}
+.intent.ok{border-left-color:var(--ok)}
+.intent b{color:var(--bad)}
+.halluc{margin-top:6px;color:var(--bad)}
+.halluc b{color:var(--bad)}
+.intent .tag{margin-right:7px}
+.fineprint{color:var(--faint);font-size:10.5px;margin-top:5px}
+
+.metrics{display:flex;gap:18px;flex-wrap:wrap;font-size:11.5px;margin-bottom:10px}
+.metrics div{color:var(--faint)}
+.metrics b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.metrics b.sig{color:var(--hit)}
+
+figure{margin:0}
+figcaption{color:var(--faint);font-size:10.5px;margin-top:5px}
+img.strip{width:100%;border-radius:2px;border:1px solid var(--rule);display:block;
+  cursor:zoom-in;background:#000}
+video{width:100%;border-radius:2px;border:1px solid var(--rule);background:#000;display:block}
+details{margin-top:8px}
+summary{cursor:pointer;color:var(--faint);font-size:11px;letter-spacing:.06em}
+summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+pre{background:var(--sunk);border:1px solid var(--rule);border-radius:2px;padding:10px;
+  overflow-x:auto;font-size:10.5px;color:var(--dim);margin:8px 0 0}
+
+.scroll{overflow-x:auto}
+table.views{width:100%;border-collapse:collapse;margin-top:8px;font-size:11px}
+table.views th{text-align:left;color:var(--faint);font-weight:500;padding:5px 8px;
+  border-bottom:1px solid var(--rule);letter-spacing:.06em;white-space:nowrap}
+table.views td{padding:5px 8px;border-bottom:1px solid var(--sunk);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+table.views tr.fail td{color:var(--bad)}
+table.views td.reason{color:var(--faint);font-size:10.5px;white-space:normal;min-width:220px}
+
+.empty{color:var(--faint);padding:22px;text-align:center;border:1px dashed var(--rule);
+  border-radius:3px}
+#crash{display:none;border:1px solid var(--bad);background:var(--bad-dim);color:var(--bad);
+  padding:12px 14px;border-radius:3px;margin-bottom:16px;white-space:pre-wrap}
+
+#lightbox{display:none;position:fixed;inset:0;background:rgba(6,7,9,.94);z-index:50;
+  align-items:center;justify-content:center;padding:24px;cursor:zoom-out}
+#lightbox img{max-width:100%;max-height:100%;border:1px solid var(--rule)}
+@media (prefers-reduced-motion:reduce){.pulsing{animation:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <h1>PENUMBRA</h1>
+    <div class="tagline">perception chaos engineering for physical AI</div>
+    <div class="sub" id="sub">connecting…</div>
+    <div class="cams" id="cams"></div>
+  </div>
+  <div class="live"><span class="dot pulsing" id="dot"></span><span id="livetext">live</span></div>
+</header>
+
+<div id="crash"></div>
+<div class="rail" id="rail"></div>
+
+<div class="phase">
+  <span class="k">Phase</span><span class="v" id="phase">—</span>
+  <span class="k" style="margin-left:auto">Updated</span><span class="v" id="updated">—</span>
+</div>
+
+<div class="grid" id="stats"></div>
+<div id="headline"></div>
+
+<h2>Control — the no-op re-render</h2>
+<div id="control"><div class="empty">not yet established</div></div>
+
+<div id="correction"></div>
+
+<h2>Situations</h2>
+<div class="chips" id="chips"></div>
+<div id="scenarios"><div class="empty">waiting for the director…</div></div>
+
+</div>
+<div id="lightbox"><img alt="enlarged frame strip"></div>
+
+<script>
+"use strict";
+
+/* A syntax error in this block used to kill the page silently: the server still
+   answered 200, the markup still arrived, and nothing rendered. Surface it. */
+function crash(msg) {
+  var el = document.getElementById("crash");
+  el.style.display = "block";
+  el.textContent = "dashboard error — the run itself is unaffected:\n" + msg;
+}
+window.addEventListener("error", function (e) { crash(e.message); });
+
+var $ = function (id) { return document.getElementById(id); };
+var NL = "\n";
+
+function esc(s) {
+  var v = (s === null || s === undefined) ? "" : String(s);
+  return v.replace(/[&<>"]/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+  });
+}
+function num(v, d) {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
+  return Number(v).toFixed(d === undefined ? 4 : d);
+}
+function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
+
+var FILTER = "all";
+var LAST = null;
+
+/* ------------------------------------------------------------ pipeline rail */
+
+var STEPS = [
+  ["noise floor", ["baseline"]],
+  ["director", ["director"]],
+  ["control", ["control", "control_done"]],
+  ["render + gate", ["rendering", "scenarios"]],
+  ["screen", ["screening"]],
+  ["confirm", ["confirming"]],
+  ["correct", ["done"]]
+];
+
+function renderRail(phase) {
+  var active = -1, i;
+  for (i = 0; i < STEPS.length; i++) {
+    if (STEPS[i][1].indexOf(phase) !== -1) active = i;
+  }
+  var html = "";
+  for (i = 0; i < STEPS.length; i++) {
+    var cls = "step", mark = "waiting";
+    if (phase === "done") { cls = "step past"; mark = "done"; }
+    else if (i === active) { cls = "step on"; mark = "running"; }
+    else if (active > i) { cls = "step past"; mark = "done"; }
+    html += '<div class="' + cls + '"><div class="k">' + esc(STEPS[i][0]) +
+            '</div><div class="s">' + mark + "</div></div>";
+  }
+  $("rail").innerHTML = html;
+}
+
+/* -------------------------------------------------------------------- cards */
+
+function statusTag(s) {
+  if (s.status === "rejected") return ["rej", "t-bad", "render rejected"];
+  if (s.status === "no_change") return ["wait", "t-wait", "editor declined"];
+  if (s.status === "error") return ["rej", "t-bad", "failed"];
+  if (s.status === "done") {
+    if (s.is_vulnerability) {
+      return ["hit", "t-hit", s.passes_bonferroni ? "vulnerability · strong" : "vulnerability"];
+    }
+    /* Significant alone but not after suite-wide correction: say so, rather than
+       showing it as a plain miss. */
+    if (s.vs_control && s.vs_control.any_significant && s.passes_fdr === false) {
+      return ["clear", "t-ok", "not after correction"];
+    }
+    return ["clear", "t-ok", "no effect"];
+  }
+  if (s.status === "rendered") return ["wait", "t-wait", "awaiting screening"];
+  if (s.status === "queued") return ["wait", "t-wait", "queued"];
+  return ["busy", "t-busy", String(s.status).replace(/_/g, " ")];
+}
+
+function bucket(s) {
+  if (s.is_vulnerability) return "hits";
+  if (s.status === "no_change") return "nochange";
+  if (s.status === "rejected" || s.status === "error") return "rejected";
+  if (s.status === "done") return "clear";
+  return "pending";
+}
+
+function metrics(s) {
+  var c = s.vs_control, g = s.gate, d = s.distance, bits = [];
+  if (!c && !g) return "";
+  if (c) {
+    /* At the floor the p-value stops discriminating: several conditions land on the
+       identical number because none of them could be more extreme at this sample
+       size. Say so on the number itself, so nobody reads five identical p-values as
+       five identical effects. */
+    bits.push('<div>vs control p <b class="' + (c.significant_at_alpha ? "sig" : "") +
+              '" title="' + (c.at_resolution_floor
+                ? "at the smallest p this design can express (N=" + c.n_baseline +
+                  ", M=" + c.n_perturbed + "); the effect size discriminates, not this"
+                : "permutation test against the no-op control") +
+              '">' + num(c.p_value) +
+              (c.at_resolution_floor ? " ⌊floor⌋" : "") + "</b></div>");
+    bits.push("<div>effect d <b>" + (c.effect_size_cohens_d >= 0 ? "+" : "") +
+              num(c.effect_size_cohens_d, 2) + "</b></div>");
+    bits.push('<div>gripper p <b class="' + (c.significant_gripper ? "sig" : "") +
+              '">' + num(c.gripper_p_value) + "</b></div>");
+  }
+  if (g) {
+    bits.push("<div>geometry drift <b>" + num(g.geometry_drift, 5) + "</b> (" +
+              num(g.geometry_drift_pixels_equivalent, 1) + " px)</div>");
+  }
+  if (d) bits.push("<div>visual distance <b>" + num(d.rmse) + "</b></div>");
+  if (s.rollouts) {
+    bits.push("<div>rollouts <b>" + s.rollouts + "</b>" +
+              (s.stage && s.stage !== "queued" ? " (" + esc(s.stage) + ")" : "") + "</div>");
+  }
+  return '<div class="metrics">' + bits.join("") + "</div>";
+}
+
+function media(s) {
+  /* Video first, because a trajectory is the thing worth watching - flicker,
+     objects appearing mid-clip, and structure sliding are all invisible in a still.
+     It is written as H.264 now; mp4v (OpenCV's default) is MPEG-4 Part 2 and no
+     browser decodes it, which once made every generation invisible on this page while
+     the files sat happily on disk. The contact sheet stays as the fallback and as the
+     thing you can enlarge. */
+  var bits = [];
+  if (s.video) {
+    bits.push('<figure><video src="' + esc(s.video) +
+      '" controls loop muted playsinline preload="metadata"></video>' +
+      "<figcaption>all cameras — source on top, perturbed below · " +
+      "watch for objects appearing mid-clip</figcaption></figure>");
+  }
+  if (s.preview) {
+    bits.push("<details" + (s.video ? "" : " open") + "><summary>" +
+      (s.video ? "frame strip (click to enlarge)" : "frames") + "</summary>" +
+      '<figure><img class="strip" src="' + esc(s.preview) +
+      '" alt="every camera: source above, perturbed below" loading="lazy">' +
+      "<figcaption>every camera — source above, perturbed below</figcaption>" +
+      "</figure></details>");
+  }
+  return bits.join("");
+}
+
+function intent(iv) {
+  /* Whether the render shows what the situation's NAME claims. Never gates anything:
+     an unsupported name leaves the statistics intact and only removes the right to
+     say what caused the change. */
+  if (!iv || !iv.verdict || iv.verdict === "unknown") { return ""; }
+  var bad = iv.credible === false;
+  var label = String(iv.verdict).replace(/_/g, " ");
+  var added = (iv.added_objects || []).filter(function (o) { return o; });
+  return '<div class="intent ' + (bad ? "bad" : "ok") + '">' +
+    '<span class="tag ' + (bad ? "t-bad" : "t-ok") + '">render ' + esc(label) + "</span> " +
+    esc(iv.observed || iv.note) +
+    (bad ? " <b>The measured effect stands; the situation's name does not.</b>" : "") +
+    /* An invented object is the most likely thing the policy is actually reacting to,
+       so it gets its own line rather than being buried in the sentence above. */
+    (added.length
+      ? '<div class="halluc">invented, not requested: <b>' +
+        added.map(esc).join(", ") + "</b></div>"
+      : "") +
+    '<div class="fineprint">independent vision-model adjudication (' + esc(iv.model) +
+    "), not measurement — recorded to let you discount a finding, never to promote one" +
+    (iv.views_judged && iv.views_judged.length
+      ? " · " + iv.views_judged.length + " camera(s) judged" : "") + "</div></div>";
+}
+
+function attemptTrail(s) {
+  /* How many goes it took, and what the agent changed each time. A situation that
+     needed three attempts is weaker evidence than one that worked immediately, and
+     that has to be visible rather than buried in the JSON. */
+  var a = s.render_attempts || [];
+  if (a.length < 2) { return ""; }
+  var rows = a.map(function (h) {
+    return "<li><b>attempt " + h.attempt + "</b> — " + esc(h.outcome) +
+      '<div class="prompt" style="margin:5px 0">' + esc(h.prompt) + "</div>" +
+      (h.detail ? '<div class="fineprint">' + esc(h.detail) + "</div>" : "") +
+      (h.agent_reasoning
+        ? '<div class="fineprint">agent rewrote it: ' + esc(h.agent_reasoning) + "</div>"
+        : "") + "</li>";
+  }).join("");
+  return '<div class="intent bad"><span class="tag t-bad">' + a.length +
+    " render attempts</span> the first generation was not usable; the prompt was " +
+    "rewritten and re-rendered. Selection like this makes the result conditional — " +
+    "weigh it accordingly." +
+    '<ol style="margin:9px 0 0;padding-left:18px">' + rows + "</ol></div>";
+}
+
+function viewTable(perView) {
+  if (!perView) return "";
+  var rows = "";
+  Object.keys(perView).forEach(function (v) {
+    var g = perView[v];
+    var failed = g.status !== "VALID";
+    rows += '<tr class="' + (failed ? "fail" : "") + '">' +
+      "<td>" + esc(v) + "</td>" +
+      "<td>" + esc(g.status) + "</td>" +
+      "<td>" + num(g.geometry_drift, 5) + "</td>" +
+      "<td>" + num(g.geometry_drift_p90, 5) + "</td>" +
+      "<td>" + num(g.structure_retained, 3) + "</td>" +
+      "<td>" + num(g.temporal_ratio, 2) + "</td>" +
+      '<td class="reason">' + esc((g.reasons || []).join("; ")) +
+      (g.marginal ? " <b>(marginal — within 10% of the bar)</b>" : "") + "</td></tr>";
+  });
+  return "<details><summary>per-camera gate verdicts</summary>" +
+    '<div class="scroll"><table class="views"><thead><tr>' +
+    "<th>camera</th><th>verdict</th><th>drift</th><th>p90</th><th>structure</th>" +
+    "<th>temporal</th><th>reason</th></tr></thead><tbody>" + rows +
+    "</tbody></table></div></details>";
+}
+
+function scenarioCard(s) {
+  var t = statusTag(s);
+  var vcls = (s.status === "rejected" || s.status === "error") ? "v-bad"
+           : (s.is_vulnerability ? "v-hit" : "v-ok");
+  return '<div class="card ' + t[0] + '">' +
+    '<div class="card-top"><span><span class="name">' + esc(s.name) + "</span>" +
+    (s.category ? '<span class="cat">' + esc(s.category) + "</span>" : "") +
+    '</span><span class="tag ' + t[1] + '">' + esc(t[2]) + "</span></div>" +
+    '<div class="situation">' + esc(s.situation) + "</div>" +
+    '<div class="why">' + esc(s.why_it_might_break) + "</div>" +
+    '<div class="prompt">' + esc(s.prompt) + "</div>" +
+    (s.verdict && s.status !== "queued"
+      ? '<div class="verdict ' + vcls + '">' + esc(s.verdict) + "</div>" : "") +
+    intent(s.intent) + attemptTrail(s) + metrics(s) + media(s) +
+    viewTable(s.per_view_gate) +
+    (s.vs_control
+      ? "<details><summary>full statistics</summary><pre>" +
+        esc(JSON.stringify(s.vs_control, null, 2)) + "</pre></details>"
+      : "") +
+    "</div>";
+}
+
+/* ----------------------------------------------------------------- headline */
+
+function headline(st, sc) {
+  if (st.phase !== "done") return "";
+  var hits = sc.filter(function (s) { return s.is_vulnerability; });
+  var tested = sc.filter(function (s) { return s.vs_control; }).length;
+  if (!hits.length) {
+    return '<div class="card wait"><div class="name">No situation moved this policy</div>' +
+      '<div class="why" style="margin-top:6px">' + plural(tested, "situation", "situations") +
+      " survived the validity gate and were tested against the no-op control; none " +
+      "separated from it after suite-wide correction. That is a real result about this " +
+      "episode and this policy — but read it next to how many renders the gate " +
+      "rejected, since that bounds what was actually searched.</div></div>";
+  }
+  var unnamed = 0;
+  var items = hits.map(function (s) {
+    var c = s.vs_control || {};
+    var bad = s.intent && s.intent.credible === false;
+    if (bad) { unnamed += 1; }
+    return "<li><b>" + esc(s.situation) + "</b> — p=" + num(c.p_value) + ", d=" +
+      (c.effect_size_cohens_d >= 0 ? "+" : "") + num(c.effect_size_cohens_d, 2) +
+      (s.passes_bonferroni ? " (survives Bonferroni)" : "") +
+      (bad ? " · <b>name unsupported by the render</b>" : "") + "</li>";
+  }).join("");
+  return '<div class="headline"><div class="t">' +
+    plural(hits.length, "situation", "situations") +
+    " changed what this policy does</div>" +
+    '<div class="why" style="color:var(--ink)">Out of ' +
+    plural(tested, "tested situation", "tested situations") +
+    ", each measured against a no-op re-render of the same episode so the video " +
+    "model's own redrawing cannot be mistaken for a finding.</div><ul>" + items + "</ul>" +
+    (unnamed
+      ? '<div class="fine" style="color:var(--bad)">' + unnamed + " of these " +
+        (unnamed === 1 ? "was" : "were") + " judged not to show the situation " +
+        "described. The behaviour change is measured; the label is not. Read those " +
+        "as <em>this render</em> moved the policy, not <em>this situation</em>.</div>"
+      : "") +
+    '<div class="fine">Claimed: the policy’s action distribution separates from the ' +
+    "control under this appearance change, on this episode, over this window. Not " +
+    "claimed: that a real robot would fail, or that the cause is the object named in " +
+    "the prompt. Both need the same intervention run across more episodes.</div></div>";
+}
+
+/* ------------------------------------------------------------------- render */
+
+function render(st) {
+  LAST = st;
+  $("sub").textContent = [st.task, st.episode, st.policy].filter(Boolean).join(" · ");
+  var touched = st.views || [];
+  var clean = st.views_untouched || [];
+  $("cams").innerHTML = touched.length
+    ? "perturbed: <b>" + touched.map(esc).join(", ") + "</b>" +
+      (clean.length ? " · left at true appearance: <i>" + clean.map(esc).join(", ") +
+        "</i>" : "")
+    : "";
+  $("phase").textContent = st.phase_detail || st.phase || "—";
+  $("updated").textContent = st.updated || "—";
+  var finished = st.phase === "done" || st.phase === "error";
+  $("dot").classList.toggle("pulsing", !finished);
+  $("livetext").textContent = finished ? "finished" : "live";
+  renderRail(st.phase);
+
+  var sc = st.scenarios || [];
+  var hits = sc.filter(function (s) { return s.is_vulnerability; }).length;
+  var rej = sc.filter(function (s) { return s.status === "rejected"; }).length;
+  var err = sc.filter(function (s) { return s.status === "error"; }).length;
+  var tested = sc.filter(function (s) { return s.vs_control; }).length;
+  var judged = sc.filter(function (s) {
+    return s.intent && s.intent.verdict && s.intent.verdict !== "unknown";
+  });
+  var credible = judged.filter(function (s) { return s.intent.credible; }).length;
+  var cells = [
+    ["Situations", sc.length, false],
+    ["Gate passed", Math.max(0, sc.length - rej - err), false],
+    ["Tested", tested, false],
+    ["Vulnerabilities", hits, hits > 0],
+    ["Renders rejected", rej, false],
+    /* How often the editor actually produced the situation it was asked for. Low here
+       is not a bug in the suite - it is a measured property of the video model, and it
+       bounds what any situation NAME in this run is entitled to claim. */
+    ["Render matched prompt", judged.length ? credible + "/" + judged.length : "—", false],
+    ["Renders w/ invented objects",
+     judged.length ? judged.filter(function (s) { return s.intent.hallucinated; }).length : "—",
+     false],
+    ["Spend", st.cost ? "$" + Number(st.cost.estimated_usd).toFixed(2) : "—", false]
+  ];
+  $("stats").innerHTML = cells.map(function (c) {
+    return '<div class="cell' + (c[2] ? " hi" : "") + '"><div class="k">' + c[0] +
+      '</div><div class="v">' + c[1] + "</div></div>";
+  }).join("");
+
+  $("headline").innerHTML = headline(st, sc);
+
+  var c = st.control;
+  $("control").innerHTML = !c ? '<div class="empty">not yet established</div>' :
+    '<div class="card ' + (c.gate && c.gate.valid ? "clear" : "rej") + '">' +
+    '<div class="card-top"><span class="name">null_control</span><span class="tag ' +
+    (c.gate && c.gate.valid ? "t-ok" : "t-bad") + '">' +
+    (c.gate && c.gate.valid ? "valid" : "rejected") + "</span></div>" +
+    '<div class="why">The same episode re-rendered by X2 with a prompt asking for no ' +
+    "change. Every situation below is measured against <em>this</em>, not against the " +
+    "raw recording — X2 redraws every pixel whatever the prompt says, and that " +
+    "redraw alone moves this policy. Comparing to the control cancels it.</div>" +
+    '<div class="prompt">' + esc(c.prompt) + "</div>" +
+    '<div class="metrics"><div>geometry drift <b>' +
+    num(c.gate && c.gate.geometry_drift, 5) + "</b></div>" +
+    "<div>visual distance <b>" + num(c.distance && c.distance.rmse) + "</b></div>" +
+    "<div>rollouts <b>" + esc(c.rollouts) + "</b></div>" +
+    (c.vs_baseline ? "<div>vs raw episode p <b>" + num(c.vs_baseline.p_value) +
+      "</b></div>" : "") + "</div>" +
+    media(c) + viewTable(c.per_view_gate) + "</div>";
+
+  var corr = st.correction;
+  $("correction").innerHTML = !corr ? "" :
+    '<div class="card wait" style="margin-top:16px"><div class="card-top">' +
+    '<span class="name">suite-wide correction</span><span class="tag t-wait">' +
+    esc(corr.n_tests) + " tests</span></div>" +
+    '<div class="why">One control, ' + esc(corr.n_tests) + " tests. At α=" +
+    esc(corr.alpha) + " per test, chance alone produces apparent hits, so a situation " +
+    "is only called a vulnerability if it survives Benjamini–Hochberg across the " +
+    "whole suite. Bonferroni (α=" + num(corr.bonferroni_alpha, 5) +
+    ") is the stricter bar.</div>" +
+    '<div class="metrics"><div>FDR discoveries <b>' + corr.discoveries_fdr.length +
+    "</b></div><div>Bonferroni <b>" + corr.discoveries_bonferroni.length +
+    "</b></div></div></div>";
+
+  var counts = { all: sc.length, hits: 0, clear: 0, rejected: 0, nochange: 0, pending: 0 };
+  sc.forEach(function (s) { counts[bucket(s)] += 1; });
+  var labels = [["all", "all"], ["hits", "vulnerabilities"], ["clear", "no effect"],
+                ["rejected", "rejected"], ["nochange", "editor declined"],
+                ["pending", "pending"]];
+  $("chips").innerHTML = labels.map(function (l) {
+    return '<button class="chip" data-f="' + l[0] + '" aria-pressed="' +
+      (FILTER === l[0]) + '">' + l[1] + " " + counts[l[0]] + "</button>";
+  }).join("");
+
+  var shown = FILTER === "all" ? sc
+    : sc.filter(function (s) { return bucket(s) === FILTER; });
+  $("scenarios").innerHTML = shown.length === 0
+    ? '<div class="empty">' +
+      (sc.length ? "nothing in this group" : "waiting for the director…") + "</div>"
+    : shown.map(scenarioCard).join("");
+}
+
+/* ------------------------------------------------------------------- wiring */
+
+document.addEventListener("click", function (e) {
+  var t = e.target;
+  var chip = t.closest ? t.closest(".chip") : null;
+  if (chip) { FILTER = chip.getAttribute("data-f"); if (LAST) { render(LAST); } return; }
+  var img = t.closest ? t.closest("img.strip") : null;
+  if (img) {
+    var box = $("lightbox");
+    box.querySelector("img").src = img.src;
+    box.style.display = "flex";
+    return;
+  }
+  if (t.id === "lightbox" || t.parentElement === $("lightbox")) {
+    $("lightbox").style.display = "none";
+  }
+});
+document.addEventListener("keydown", function (e) {
+  if (e.key === "Escape") { $("lightbox").style.display = "none"; }
+});
+
+var es = new EventSource("/events");
+es.onmessage = function (e) {
+  try { render(JSON.parse(e.data)); } catch (err) { crash(String(err)); }
+};
+es.onerror = function () { $("livetext").textContent = "reconnecting"; };
+</script>
+</body>
+</html>

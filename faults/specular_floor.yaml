@@ -1,0 +1,37 @@
+name: specular_floor
+version: "1"
+family: surface
+model: xmax/x2
+description: >
+  Wet, polished, mirror-like table and floor. Targets the surface the manipulation
+  happens on, which is where a real facility varies most (floor wax, spills, mopping)
+  and where classical augmentation cannot go: a global brightness or contrast change
+  cannot make one surface reflective while leaving the objects on it alone.
+
+# X2 has no numeric strength parameter (verified absent). This ladder IS the
+# strength axis, and it is ordinal by construction. Rung 0.0 must be a no-op.
+ladder:
+  - strength: 0.0
+    label: untouched
+    prompt: ""
+  - strength: 0.2
+    label: faint sheen
+    prompt: "the wooden table surface has a faint damp sheen, slightly glossy"
+  - strength: 0.4
+    label: wet
+    prompt: "the wooden table surface is wet and glossy, soft reflections of the room on the tabletop"
+  - strength: 0.6
+    label: reflective
+    prompt: "the table surface is wet and highly reflective, clear specular reflections of overhead lights across the tabletop"
+  - strength: 0.8
+    label: mirror
+    prompt: "the table is a polished mirror-like wet surface, strong mirror reflections of the room and bright overhead lights covering the tabletop"
+  - strength: 1.0
+    label: flooded mirror
+    prompt: "the table is flooded with water, a mirror-bright reflective sheet, harsh glaring specular highlights and mirrored reflections dominating the whole surface"
+
+validation:
+  max_geometry_drift: 0.0055
+  min_structure_retained: 0.35
+
+corroborate_with: reactor/sana-streaming

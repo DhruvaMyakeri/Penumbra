@@ -1,0 +1,68 @@
+name: target_removal
+version: "1"
+family: provenance
+model: xmax/x2
+
+description: >
+  PROVENANCE probe, using X2's verified spatial controls.
+
+  The instruction given to the policy is "Pour the contents of the yellow cup into
+  the bowl". This fault progressively removes the yellow cup - the one object the
+  instruction names - from the camera view the policy sees, while the arm's real
+  trajectory, the wrist camera, the second exterior camera and all proprioception
+  stay exactly as recorded.
+
+  The question is whether the policy's behaviour is conditioned on seeing the object
+  it is being told about, or whether it is reading the trajectory, the table, and the
+  arm pose instead.
+
+  READ THE RESULT CAREFULLY. Behaviour that does not change is evidence the policy is
+  not reading this camera's view of the cup. It is NOT proof of causal blindness:
+  (a) the wrist camera still shows the cup, which is deliberate - removing every view
+  would change the observation so much that the comparison stops being controlled;
+  (b) an edit can leave residual cues; (c) the SEAM gate bounds displacement but is
+  explicitly blind to cleanly-inpainted stationary content. This fault generates a
+  hypothesis, not a verdict.
+
+# Spatial anchor: measured, not guessed. The yellow cup's centroid was located by HSV
+# segmentation over 12 frames of the evaluation window (episode 0, frames 120-216);
+# it sits at x = 0.587 +/- 0.006, y = 0.642 +/- 0.007 in normalised frame coordinates.
+# See tools/locate_target.py.
+pointer:
+  x: 0.587
+  y: 0.642
+  active: true
+
+ladder:
+  - strength: 0.0
+    label: untouched
+    prompt: ""
+  - strength: 0.25
+    label: desaturated
+    prompt: "the yellow cup held by the robot gripper is pale grey and desaturated, the rest of the scene unchanged"
+  - strength: 0.5
+    label: recolored
+    prompt: "the yellow cup held by the robot gripper is a dark blue cup, the rest of the scene unchanged"
+  - strength: 0.75
+    label: faded
+    prompt: "the yellow cup held by the robot gripper is faded and translucent, barely visible against the table, the rest of the scene unchanged"
+  - strength: 1.0
+    label: removed (requested)
+    # MEASURED OUTCOME, run perturb-target_removal-20260821-111730:
+    # X2 does NOT remove the object. It renders the cup as translucent glass and
+    # leaves it in the gripper. tools/verify_removal.py found only 48% of the
+    # target's coloured pixels gone inside the pointer region, and total
+    # target-coloured pixels across the frame actually ROSE to 1.10x the source.
+    # So this rung is a strong MATERIAL/APPEARANCE change of the target object,
+    # not a removal, and it must not be reported as one. H3 is not testable by
+    # this route until an intervention is found that actually lands.
+    prompt: "there is no cup, the robot gripper is empty and holds nothing, only bare wooden table below the empty gripper, the rest of the scene unchanged"
+
+validation:
+  # Looser than the appearance faults, because removing an object legitimately
+  # changes edge structure where the object used to be. Still far below the 4 px
+  # displacement bar - the arm and table must not move.
+  max_geometry_drift: 0.0055
+  min_structure_retained: 0.25
+
+corroborate_with: reactor/sana-streaming

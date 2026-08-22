@@ -1,0 +1,34 @@
+name: backlight_glare
+version: "1"
+family: illumination
+model: xmax/x2
+description: >
+  Low sun or a bright window behind the scene, producing lens flare, blooming and
+  crushed shadows. This is the condition the VLA survey (arXiv 2511.05936) names as
+  missing from existing distribution-shift benchmarks.
+
+ladder:
+  - strength: 0.0
+    label: untouched
+    prompt: ""
+  - strength: 0.2
+    label: warm light
+    prompt: "warm late-afternoon sunlight entering from behind the scene, gentle warm cast"
+  - strength: 0.4
+    label: bright backlight
+    prompt: "strong late-afternoon sun behind the scene, bright backlight, warm haze and lifted shadows"
+  - strength: 0.6
+    label: glare
+    prompt: "harsh low sun directly behind the scene, strong lens glare and blooming, washed out highlights and deep shadows"
+  - strength: 0.8
+    label: severe flare
+    prompt: "severe lens flare from a blinding low sun behind the scene, heavy bloom, streaking flare artifacts across the frame, crushed shadows"
+  - strength: 1.0
+    label: blinding
+    prompt: "blinding sun flare overwhelming the camera, extreme bloom and veiling glare washing out most of the frame, heavy chromatic flare streaks, near-blown highlights"
+
+validation:
+  max_geometry_drift: 0.0055
+  min_structure_retained: 0.30
+
+corroborate_with: reactor/sana-streaming

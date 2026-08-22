@@ -1,0 +1,94 @@
+name: target_occlusion
+version: "1"
+family: occlusion
+model: xmax/x2
+
+description: >
+  Spatially anchored occlusion using X2's verified SDK controls: an uploaded reference
+  object (set_reference_image) inserted at a measured screen position
+  (set_pointer with active=true) so that it stands between the camera and the yellow
+  cup the task instruction names.
+
+  This is the intervention class that classical augmentation structurally cannot match.
+  A global pixel transform cannot place an opaque object at a specific image location
+  and leave the rest of the scene alone; that requires knowing what is where.
+
+  Unlike the prompt-only target_removal fault - which X2 answered by making the cup
+  translucent rather than removing it - this fault must be verified before any
+  behavioural claim is made from it. tools/verify_occlusion.py checks that the
+  occluder appears, sits where it was aimed, overlaps the target, persists across
+  frames, and leaves unrelated geometry intact. A run that fails those checks is an
+  intervention that did not land, and its policy result says nothing about the policy.
+
+  MEASURED OUTCOME - READ BEFORE USING THIS FAULT'S NAME AS ITS DESCRIPTION.
+  Runs perturb-target_occlusion-20260821-125347 and -125903 established that
+  **X2 does not insert the reference object.** No cardboard box appeared in any view
+  in either run. set_reference_image and set_pointer were both accepted without error
+  and both were, on this scene, without the intended effect:
+
+      occluder appears        NO   (median change area 0.004, below the 0.012 bar)
+      change on target        NO   (centroid 0.47 away from the anchor)
+      overlaps the target     NO   (0.21, below the 0.25 bar)
+      persists                NO   (0.19 of frames, below the 0.80 bar)
+      leaves scene intact     yes
+      passes SEAM             yes
+
+  What X2 did instead was **amplify the target object**: the yellow cup grew to
+  x4.92 and x5.07 its original target-coloured pixel count across the two runs.
+
+  So this fault is, empirically, an ALL-VIEW TARGET AMPLIFICATION, not an occlusion.
+  It is kept under this name because two recorded experiments reference it and
+  renaming would break their provenance - not because the name describes it. Any
+  result from it must be reported as amplification.
+
+# Per-view anchors, each measured rather than guessed. The same cup sits at very
+# different image coordinates across the DROID rig, and covers wildly different areas,
+# so one shared coordinate would aim the occluder at empty table in two of three views.
+# Measured over episode 0, frames 120-216 (tools/locate_target.py):
+#
+#   exterior_1  x 0.587 +/- 0.006   y 0.642 +/- 0.007      838 px
+#   exterior_2  x 0.589 +/- 0.012   y 0.755 +/- 0.018     1796 px
+#   wrist       x 0.304 +/- 0.035   y 0.466 +/- 0.020   114181 px  (fills the frame)
+#
+# Each anchor is placed slightly below the measured centroid so an object resting on
+# the table occludes the cup from that camera's viewpoint rather than floating in
+# front of it. The wrist camera looks almost straight down onto the cup, so its anchor
+# is left at the centroid.
+pointer:
+  exterior_image_1_left:
+    x: 0.587
+    y: 0.660
+    active: true
+  exterior_image_2_left:
+    x: 0.589
+    y: 0.775
+    active: true
+  wrist_image_left:
+    x: 0.304
+    y: 0.466
+    active: true
+
+reference_image: assets/cardboard_box.png
+
+ladder:
+  - strength: 0.0
+    label: untouched
+    prompt: ""
+  - strength: 0.4
+    label: object beside target
+    prompt: "a cardboard box from the reference image is sitting on the table beside the yellow cup"
+  - strength: 0.7
+    label: partial occlusion
+    prompt: "a large cardboard box from the reference image sits on the table directly in front of the yellow cup, partly hiding it from view"
+  - strength: 1.0
+    label: full occlusion
+    prompt: "a large cardboard box from the reference image stands on the table directly in front of the yellow cup, completely blocking the cup from the camera's view, the box fully hides the cup"
+
+validation:
+  max_geometry_drift: 0.0055
+  # Inserting an opaque object legitimately replaces edge structure where the object
+  # now stands, so the structure bar is lower here than for the appearance faults.
+  # It is not zero: the rest of the scene - table, arm, bowl - must survive.
+  min_structure_retained: 0.20
+
+corroborate_with: reactor/sana-streaming

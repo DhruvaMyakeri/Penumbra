@@ -1,0 +1,43 @@
+name: null_edit
+version: "1"
+family: control
+model: xmax/x2
+
+description: >
+  CRITICAL CONTROL, not a fault.
+
+  X2 is a video-to-video model: it re-renders every pixel of every frame, whatever the
+  prompt asks for. A "wet floor" edit and a "cardboard box" edit both arrive at the
+  policy as a fully regenerated image, and both measure RMSE ~0.06 from the source
+  largely because generative re-rendering is not pixel-exact.
+
+  So a significant behavioural effect from an all-view X2 perturbation has two
+  candidate explanations:
+
+    (a) the semantic content of the edit changed what the policy sees, or
+    (b) passing all three views through a generative re-render at all is enough,
+        regardless of what the prompt asked for.
+
+  Every result in section 7.12-7.14 is ambiguous between these until (b) is tested.
+  This fault tests it: an edit prompt that asks for essentially nothing, applied
+  through the identical pipeline, at the identical view coverage.
+
+  If null_edit is NOT significant, the content of the perturbation is doing the work.
+  If null_edit IS significant, then the finding is "the policy is sensitive to
+  generative re-rendering", which is a real and interesting result but a completely
+  different claim - and every margin reported for the other faults would be
+  measuring the re-render, not the fault.
+
+  There is no honest way to report the main result without this control.
+
+ladder:
+  - strength: 0.0
+    label: untouched
+    prompt: ""
+  - strength: 1.0
+    label: no-op edit
+    prompt: "the scene is exactly as it is, an ordinary well-lit room, no changes"
+
+validation:
+  max_geometry_drift: 0.0055
+  min_structure_retained: 0.20
