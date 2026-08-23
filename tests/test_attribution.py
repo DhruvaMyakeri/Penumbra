@@ -278,3 +278,54 @@ def test_scenario_report_shows_the_camera_disagreement_table():
     text = scenario_report(_state()["scenarios"][1], run_name="r")
     assert "Camera by camera" in text
     assert "The cameras disagree" in text
+
+
+# -- the null-control categories -----------------------------------------------
+
+def test_a_null_control_category_rejects_object_prompts():
+    """The reason this exists, from a live run.
+
+    The director put "the bowl is filled with purple yogurt" into `environment` - a
+    category whose entire job is to keep testing the measured null that scene-only
+    changes never move this policy. An object prompt there removes the control while
+    the suite still reports having one, and nothing would have flagged it.
+    """
+    from penumbra.scenarios.director import _category_violation
+
+    env = CATEGORIES["environment"]
+    assert _category_violation("The bowl is filled with purple yogurt.", env)
+    assert _category_violation("The cup is rough grey concrete.", env)
+    assert _category_violation("The back wall is bright orange.", env) is None
+
+
+def test_categories_without_a_budget_are_unconstrained():
+    from penumbra.scenarios.director import _category_violation
+
+    assert _category_violation("The bowl is filled with foam.",
+                               CATEGORIES["object_appearance"]) is None
+    assert _category_violation("anything at all", None) is None
+
+
+def test_both_null_controls_carry_an_object_budget():
+    """If either loses its budget, the null silently stops being tested."""
+    for name in ("environment", "sensor_fault"):
+        assert CATEGORIES[name].get("max_objects") == 0, name
+
+
+# -- transport resilience ------------------------------------------------------
+
+def test_a_dropped_session_is_retryable_but_a_bad_request_is_not():
+    """Measured three times: a session goes ready, drops, and every later push_frame
+    raises INVALID_STATE. That killed a head-to-head and a 21-situation suite. It is a
+    transport failure wearing a state error's clothes, so it must be retried - while a
+    genuine mistake like a malformed request must still abort.
+    """
+    from reactor_sdk.errors import (
+        BadRequestError, DisconnectedError, InvalidStateError, UnauthorizedError,
+    )
+    from penumbra.perturbation.x2 import TRANSPORT_ERRORS
+
+    assert issubclass(InvalidStateError, TRANSPORT_ERRORS)
+    assert issubclass(DisconnectedError, TRANSPORT_ERRORS)
+    assert not issubclass(BadRequestError, TRANSPORT_ERRORS)
+    assert not issubclass(UnauthorizedError, TRANSPORT_ERRORS)

@@ -42,7 +42,25 @@ from ..episodes.types import PERTURBED_VIEW, Episode
 from pathlib import Path
 
 from ..config import REPO_ROOT
+from reactor_sdk.errors import (
+    DisconnectedError, InvalidStateError, NetworkError, RequestTimeoutError,
+    ServerError, SessionTerminalError, TransportError,
+)
+
 from ..reactor.session import ReactorSession
+
+#: Failures of the connection rather than of the render. Retrying these is legitimate;
+#: retrying a BadRequestError or an UnauthorizedError would just repeat a real mistake,
+#: so those are deliberately absent and still abort the run.
+#:
+#: InvalidStateError earns its place by observation, not by name: when a session leaves
+#: the ready state the publish does not survive, and every subsequent push_frame raises
+#: it. That is a dropped connection wearing a state error's clothes.
+TRANSPORT_ERRORS = (
+    DisconnectedError, InvalidStateError, NetworkError, RequestTimeoutError,
+    ServerError, SessionTerminalError, TransportError, ConnectionError, OSError,
+    __import__("asyncio").TimeoutError,
+)
 from .spec import FaultSpec
 
 log = logging.getLogger("penumbra.perturbation")
@@ -164,6 +182,7 @@ class X2Perturbation:
         drain_seconds: float = 12.0,
         keep_backlog: bool = True,
         prime_passes: int = 0,
+        session_retries: int = 2,
     ) -> None:
         # X2 has exactly one input track, so perturbing several views means several
         # sequential sessions - one per view - not one session with three tracks.
@@ -172,6 +191,9 @@ class X2Perturbation:
         # a real property of the intervention and is recorded as such.
         self.views = tuple(views) if views else (view,)
         self.view = self.views[0]
+        #: How many times a view is re-attempted when the Reactor session drops. Not a
+        #: quality knob - it only covers transport failures.
+        self.session_retries = session_retries
         self.lead = lead
         self.tail = tail
         self.push_fps = push_fps
@@ -186,19 +208,62 @@ class X2Perturbation:
         #: pass, which is the trade being made.
         self.prime_passes = prime_passes
 
+    async def _apply_one_resilient(
+        self, episode: Episode, fault: FaultSpec, strength: float, view: str, *,
+        run_id: str,
+    ) -> PerturbationResult:
+        """One view, retrying when the Reactor session drops underneath us.
+
+        Measured three times in this project: a session reports ready, then leaves the
+        ready state mid-stream, and every subsequent `push_frame` raises INVALID_STATE
+        because a publish does not survive a reconnect. Twice that killed a run outright
+        - once a whole head-to-head, once a 21-situation suite eight minutes in, after
+        the director work was already paid for.
+
+        A dropped connection is not a property of the situation being tested, so it must
+        not end the experiment. Retrying is also cheap in the sense that matters: X2
+        takes no seed, so a re-render was never the *same* render anyway - every attempt
+        is a fresh draw from the same distribution, which is exactly what the rest of
+        the pipeline already assumes.
+
+        Only transport failures are retried. A gate rejection or an empty render is a
+        result and is returned untouched.
+        """
+        last: Exception | None = None
+        for attempt in range(1, self.session_retries + 2):
+            try:
+                return await self._apply_one(episode, fault, strength, view,
+                                             run_id=run_id if attempt == 1
+                                             else f"{run_id}-r{attempt}")
+            except TRANSPORT_ERRORS as exc:
+                last = exc
+                if attempt > self.session_retries:
+                    break
+                delay = 4.0 * attempt
+                log.warning("%s on %s: %s - reconnecting in %.0fs (attempt %d of %d)",
+                            type(exc).__name__, view, str(exc)[:120], delay,
+                            attempt + 1, self.session_retries + 1)
+                await asyncio.sleep(delay)
+        raise RuntimeError(
+            f"x2: {view} failed after {self.session_retries + 1} session attempts; "
+            f"last error {type(last).__name__}: {last}"
+        ) from last
+
     async def apply(
         self, episode: Episode, fault: FaultSpec, strength: float, *, run_id: str = "0"
     ) -> PerturbationResult:
         """Transform every configured view, one X2 session each."""
         if len(self.views) == 1:
-            return await self._apply_one(episode, fault, strength, self.view, run_id=run_id)
+            return await self._apply_one_resilient(episode, fault, strength, self.view,
+                                                   run_id=run_id)
 
         result: PerturbationResult | None = None
         current = episode
         sessions: dict = {}
         total_seconds = 0.0
         for view in self.views:
-            result = await self._apply_one(current, fault, strength, view, run_id=run_id)
+            result = await self._apply_one_resilient(current, fault, strength,
+                                                        view, run_id=run_id)
             current = result.episode
             sessions[view] = {
                 "session_id": result.session_id,

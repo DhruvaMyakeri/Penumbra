@@ -35,7 +35,7 @@ import cv2
 import numpy as np
 
 from ..config import gemini_api_key
-from .insights import rule_violations
+from .insights import prompt_features, rule_violations
 
 log = logging.getLogger("penumbra.director")
 
@@ -340,7 +340,24 @@ Reply with JSON only, an array in the same order, no markdown fence:
 """
 
 
-def _repair_prompts(scenarios: list) -> tuple[list, list]:
+def _category_violation(prompt: str, spec) -> str | None:
+    """Does this prompt break its category's own contract?
+
+    Only the null-control categories set one. They exist to keep a measured
+    null under test, and a director that quietly writes object prompts into
+    them removes the control while the suite still claims to have it.
+    """
+    if not isinstance(spec, dict) or "max_objects" not in spec:
+        return None
+    named = prompt_features(prompt)["objects_named"]
+    if named <= spec["max_objects"]:
+        return None
+    return (f"this category must name at most {spec['max_objects']} manipulable "
+            f"object(s) and this prompt names {named}; it is a null control for "
+            f"scene-only change, and an object prompt here silently removes it")
+
+
+def _repair_prompts(scenarios: list, spec=None) -> tuple[list, list]:
     """Rewrite any proposed prompt that breaks a measured rule.
 
     Returns (scenarios, notes). The director is told the rules in its own briefing and
@@ -354,8 +371,14 @@ def _repair_prompts(scenarios: list) -> tuple[list, list]:
     dropped: the scenario is the director's idea, the phrasing is the renderer's
     problem, and the render agent gets another go at it in the loop.
     """
-    bad = [(s, rule_violations(s.prompt)) for s in scenarios]
-    bad = [(s, v) for s, v in bad if v]
+    bad = []
+    for s in scenarios:
+        v = list(rule_violations(s.prompt))
+        cat = _category_violation(s.prompt, spec)
+        if cat:
+            v.append(cat)
+        if v:
+            bad.append((s, v))
     if not bad:
         return scenarios, []
 
@@ -442,7 +465,8 @@ def propose(
     except Exception as exc:  # noqa: BLE001
         log.warning("director output unparseable: %s", exc)
         return DirectorResult(raw=raw, error=f"unparseable: {exc}")
-    scenarios, repair_notes = _repair_prompts(scenarios)
+    scenarios, repair_notes = _repair_prompts(
+        scenarios, category[1] if isinstance(category, tuple) else None)
     log.info("director proposed %d scenarios", len(scenarios))
     return DirectorResult(scenarios=scenarios, raw=raw, repairs=repair_notes)
 
@@ -486,6 +510,10 @@ CATEGORIES: dict[str, dict] = {
     },
     "environment": {
         "weight": 1,
+        # The whole point of this category is to keep testing a measured null. A
+        # prompt here that names the cup or the bowl is not a scene-only change, so
+        # the null stops being tested and nobody notices. Enforced, not requested.
+        "max_objects": 0,
         "definition": "the wider workspace changes - wall colour, clutter behind the "
                       "bench, a different room. KEPT AS A NULL CONTROL: this category "
                       "has never moved the policy in 9 attempts, and is included so "
@@ -493,6 +521,7 @@ CATEGORIES: dict[str, dict] = {
     },
     "sensor_fault": {
         "weight": 1,
+        "max_objects": 0,
         "definition": "the scene degrades in a way that mimics a failing camera - haze, "
                       "condensation on the objects, a colour cast over everything. "
                       "Describe it as a property of the SCENE, never of the lens",

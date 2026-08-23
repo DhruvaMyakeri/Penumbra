@@ -114,17 +114,28 @@ async def main() -> None:
     print("\n" + "=" * 74)
     print(f"TASK: {state['task']}")
     print("=" * 74)
+    # CONFIRMED first, then the effects whose cause is not established, then the rest.
+    # Sorting these together - or marking them with the same star - is the reporting
+    # error this whole layer exists to prevent.
+    rank = {"CONFIRMED": 0, "UNATTRIBUTED": 1}
     for s in sorted(state["scenarios"], key=lambda x: (
-            not x["is_vulnerability"], x.get("vs_control", {}).get("p_value", 1) if x.get("vs_control") else 1)):
-        mark = "***" if s["is_vulnerability"] else "   "
+            rank.get(x.get("finding_class"), 2),
+            x.get("vs_control", {}).get("p_value", 1) if x.get("vs_control") else 1)):
+        klass = s.get("finding_class", "")
+        mark = "***" if klass == "CONFIRMED" else (" ? " if klass == "UNATTRIBUTED" else "   ")
         p = s.get("vs_control", {}).get("p_value") if s.get("vs_control") else None
         pv = f"p={p:.4f}" if p is not None else "        "
-        print(f"{mark} {s['name']:<30} {s.get('category','')[:18]:<19} {s['status']:<10} {pv}")
+        print(f"{mark} {s['name']:<30} {s.get('category','')[:18]:<19} "
+              f"{klass:<13} {pv}")
     summary = state.get("summary", {})
     print("-" * 74)
-    print(f"vulnerabilities : {summary.get('vulnerabilities')}")
+    print(f"CONFIRMED       : {summary.get('confirmed')}")
+    print(f"moved the policy but the cause is NOT established:")
+    print(f"                  {summary.get('unattributed')}")
     print(f"renders rejected: {summary.get('rejected_renders')}")
+    print(f"editor declined : {summary.get('no_change_renders')}")
     print(f"cost            : ${state['cost']['estimated_usd']}")
+    print(f"report          : {out / 'REPORT.md'}")
     print(f"dashboard       : {url}   (still serving; ctrl-c to stop)")
     print(f"state           : {out / 'state.json'}")
 
