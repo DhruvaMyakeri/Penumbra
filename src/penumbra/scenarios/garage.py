@@ -180,6 +180,14 @@ class ScenarioResult:
             return "UNATTRIBUTED"
         if intent.get("coherent") is False:
             return "UNATTRIBUTED"
+        # Unknown coherence is not agreement. When more than one camera was perturbed
+        # and the check could not run - a judge call failed, a camera went unjudged -
+        # nothing establishes that the two views showed the same scene, which is the
+        # exact gap this taxonomy exists to close. Caught on the first live run: the
+        # sole CONFIRMED finding had one camera judged and `coherent: None`, and was
+        # being promoted on a check that never happened.
+        if len(self.per_view_gate or {}) > 1 and intent.get("coherent") is not True:
+            return "UNATTRIBUTED"
         if not intent.get("credible"):
             return "UNATTRIBUTED"
         return "CONFIRMED"
@@ -232,6 +240,17 @@ class ScenarioResult:
             # The statistics stand on their own; the situation's NAME does not. Say
             # precisely which of the two ways the attribution failed, because they call
             # for different fixes - a rewording, or a redraw.
+            # Two distinct failures with two distinct messages. The cameras actively
+            # disagreeing is a finding about the render; the check not having run is an
+            # absence of evidence. Collapsing them would tell a reader the cameras
+            # conflicted when in fact nobody looked.
+            if intent.get("coherent") is None and len(self.per_view_gate or {}) > 1:
+                why = intent.get("coherence_note") or "the check did not run"
+                return (f"UNATTRIBUTED - {moved}. BUT CROSS-CAMERA AGREEMENT WAS NEVER "
+                        f"ESTABLISHED: {why}. Two cameras were perturbed in separate "
+                        f"unseeded passes, so without that check nothing shows they "
+                        f"rendered the same scene. Not evidence of disagreement - "
+                        f"evidence of nothing, which cannot carry a name.")
             if intent.get("coherent") is False:
                 note = (intent.get("coherence_note")
                         or "the two cameras rendered different scenes")

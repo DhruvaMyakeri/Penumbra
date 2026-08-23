@@ -398,3 +398,33 @@ def test_both_reactor_callers_use_the_shared_retry_tuple():
                                                    if hasattr(runner, "_rollout_source_probe")
                                                    else runner.ExperimentRunner._rollout)
     assert "TRANSPORT_ERRORS" in inspect.getsource(x2.X2Perturbation._apply_one_resilient)
+
+
+def test_unknown_coherence_is_not_agreement_on_a_multi_camera_run():
+    """Caught on the first live run, in the single result it promoted.
+
+    `wet_wooden_table` was the run's only CONFIRMED finding. Its intent record carried
+    `coherent: None` and one judged camera - the second camera's judge call had failed,
+    so the cross-camera check never ran. The taxonomy demoted only on `is False`, so
+    "we could not check" was passing as "the cameras agree", promoting a finding on the
+    strength of a check that never happened.
+
+    That is the same class of error as the one this whole layer was built to fix, one
+    level up.
+    """
+    r = _result({"credible": True, "verdict": "partially_applied", "coherent": None})
+    r.per_view_gate = {"cam1": {}, "cam2": {}}
+    assert r.finding_class == "UNATTRIBUTED"
+
+    # Explicit agreement still confirms.
+    r.intent = {"credible": True, "verdict": "applied", "coherent": True}
+    assert r.finding_class == "CONFIRMED"
+
+
+def test_single_camera_runs_do_not_need_coherence():
+    """With one perturbed view there are no two views to disagree, so the check is not
+    applicable rather than failed - and demanding it would make single-camera runs
+    permanently unconfirmable."""
+    r = _result({"credible": True, "verdict": "applied", "coherent": None})
+    r.per_view_gate = {"cam1": {}}
+    assert r.finding_class == "CONFIRMED"
