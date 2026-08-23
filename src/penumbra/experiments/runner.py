@@ -39,6 +39,7 @@ from ..perturbation.classical import (
 from ..perturbation.spec import FaultSpec
 from ..perturbation.x2 import PerturbationResult, X2Perturbation
 from ..policy.base import PolicyTrace
+from ..reactor.session import TRANSPORT_ERRORS
 from ..policy.cache import baseline_key, load_traces, save_traces
 from ..policy.cosmos_droid import CosmosDroidPolicy
 from ..validation.seam import SeamGate, ValidationReport, perceptual_distance
@@ -144,10 +145,19 @@ class ExperimentRunner:
     async def _rollout(self, episode: Episode, run_id: str, *, attempts: int = 3) -> PolicyTrace:
         """One policy rollout, retried on transient session failure.
 
-        Reactor sessions occasionally wedge after a successful connect. A single
-        stalled session must not discard an experiment that has already spent several
-        minutes of GPU time on its baseline, so a failed rollout is retried on a fresh
-        session. Retries are counted into the cost, because they really were spent.
+        Reactor sessions occasionally wedge after a successful connect, and sometimes
+        fail to connect at all. A single stalled session must not discard an experiment
+        that has already spent several minutes of GPU time on its baseline, so a failed
+        rollout is retried on a fresh session. Retries are counted into the cost,
+        because they really were spent.
+
+        This caught `(TimeoutError, RuntimeError)` until 2026-08-23, which caught none
+        of the failures it was written for: every reactor_sdk error derives from
+        ReactorError, which derives from Exception and NOT from RuntimeError. The retry
+        looked correct in review and in the logs, and silently could not fire. A run
+        died on a NETWORK_ERROR during connect, which is exactly the case this exists
+        to survive. `RuntimeError` is kept alongside because the policy adapter raises
+        its own on a prediction timeout.
 
         The retry is deliberately *not* silent: `retries` is surfaced so a reader can
         see that a group of rollouts was not all first-attempt.
@@ -159,7 +169,7 @@ class ExperimentRunner:
                 trace = await self.policy.rollout(episode, run_id=run_id)
                 self._policy_seconds += time.time() - t0
                 return trace
-            except (TimeoutError, RuntimeError) as exc:
+            except TRANSPORT_ERRORS + (RuntimeError,) as exc:
                 self._policy_seconds += time.time() - t0
                 self._retries += 1
                 last = exc

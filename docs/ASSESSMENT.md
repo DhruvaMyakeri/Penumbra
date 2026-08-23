@@ -4,7 +4,11 @@
 fund, adopt, or kill this. Every claim here is either backed by a run in `runs/` or
 explicitly marked as not established.
 
-**Updated:** 2026-08-21 · session 3
+**Updated:** 2026-08-23 · session 4
+
+> **Read §4.0 first.** A cross-camera audit run on 2026-08-23 invalidated the
+> headline count of every multi-camera suite this project has produced. The
+> methodology below survives; the finding counts do not.
 
 ---
 
@@ -57,6 +61,7 @@ of it.
 |---|---|---|
 | The loop runs end to end and produces reproducible artefacts | **VERIFIED** | any `runs/garage-*` |
 | Situations separate a real VLA's actions from a matched control, surviving Bonferroni | **VERIFIED** | `runs/garage-ep0-20260821-142420`: 5 of 7 tested, α_bonf = 0.003571 |
+| ...but almost none of those separations can be *attributed* to the situation they are named after | **VERIFIED** | §4.0: 19 of 21 renders incoherent across cameras |
 | ...but only **3 of those 5** show the situation they are named after | **VERIFIED** | independent VLM adjudication, §4.3 |
 | X2 follows a content prompt about a third of the time | **VERIFIED** | 7 of 21 renders judged applied or partial |
 | The finding replicates across an independent suite | **VERIFIED** | `-143928` independently re-found `greasy_wrist_lens` |
@@ -68,6 +73,46 @@ of it.
 ---
 
 ## 4. What has *not* been demonstrated — read this before quoting anything above
+
+### 4.0 The cameras were rendering different scenes, and nothing checked
+
+X2 has exactly one input track. Perturbing two cameras means **two separate sessions**,
+and X2 takes no seed, so nothing couples the draws. That limitation was documented from
+the start as "a real property of the intervention". Its consequence was never measured.
+
+`tools/coherence_audit.py` re-judged all 21 renders of `garage-ep0-20260821-234747`
+camera by camera, then asked an independent model whether the two descriptions describe
+one change or two:
+
+```
+21 renders:  2 coherent   19 showing DIFFERENT scenes on the two cameras
+             14 of the 19 had been reported as vulnerabilities
+```
+
+| render | camera 1 | camera 2 |
+|---|---|---|
+| `mirror_chrome_cup` | the **table** became chrome; cup unchanged | the **robot arm** became chrome; cup replaced |
+| `matching_pink_cup_and_bowl` | the cup became pink — correct | a pink **bucket** was added; cup still yellow |
+| `color_confused_cup` | bowl filled with reflective liquid | **no visible change at all** |
+
+The policy reads both cameras in one observation. When they disagree it is not shown a
+weaker version of the situation — it is shown two different worlds, and **no situation
+name describes its input**. A behaviour change measured against that is real and
+unattributable.
+
+**Consequence: the reported count of every multi-camera suite in this project is wrong.**
+Re-scored under the current taxonomy, `garage-ep0-20260821-234747` goes from **15
+vulnerabilities to 1 confirmed and 14 unattributed**. The statistics were never the
+problem. The names were.
+
+The fix is structural, not cosmetic. `finding_class` now separates *the policy moved*
+from *this situation moved it*, and only a render that passed the gate, that both
+cameras agree on, and that an independent judge says depicts its own name can carry the
+second claim. Incoherence is a gate, and a retryable one.
+
+**What this does not excuse.** Every earlier headline in this repository, including ones
+already shown to people, was produced without this check. Read them as unattributed.
+
 
 ### 4.1 No robot has failed. Not once.
 

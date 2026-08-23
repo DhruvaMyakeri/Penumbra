@@ -423,6 +423,7 @@ def propose(
     n: int = 6,
     avoid: list[str] | None = None,
     category: tuple[str, str] | None = None,
+    category_spec: dict | None = None,
     brief: str = "",
 ) -> DirectorResult:
     """Propose `n` scenarios for this task, having looked at the actual scene.
@@ -465,8 +466,7 @@ def propose(
     except Exception as exc:  # noqa: BLE001
         log.warning("director output unparseable: %s", exc)
         return DirectorResult(raw=raw, error=f"unparseable: {exc}")
-    scenarios, repair_notes = _repair_prompts(
-        scenarios, category[1] if isinstance(category, tuple) else None)
+    scenarios, repair_notes = _repair_prompts(scenarios, category_spec)
     log.info("director proposed %d scenarios", len(scenarios))
     return DirectorResult(scenarios=scenarios, raw=raw, repairs=repair_notes)
 
@@ -591,6 +591,7 @@ def propose_suite(
             n=n,
             avoid=[s.name for s in out],
             category=(category, definition),
+            category_spec=spec if isinstance(spec, dict) else None,
             brief=brief,
         )
         repairs.extend(result.repairs)

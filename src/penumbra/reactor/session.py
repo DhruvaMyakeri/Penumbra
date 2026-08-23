@@ -17,8 +17,36 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from reactor_sdk import Reactor, ReactorStatus
+from reactor_sdk.errors import (
+    DisconnectedError, InvalidStateError, NetworkError, RateLimitedError,
+    RequestTimeoutError, ServerError, SessionTerminalError, TransportError,
+)
 
 from ..config import reactor_api_key
+
+#: Failures of the connection rather than of the work. Retrying these is legitimate;
+#: retrying a BadRequestError or an UnauthorizedError would just repeat a real mistake.
+#: They are enumerated one by one rather than caught via their shared ReactorError base,
+#: because that base also covers those genuine mistakes.
+#:
+#: Two of these earn their place by observation rather than by name:
+#:
+#: `InvalidStateError` - when a session leaves the ready state its publish does not
+#: survive, and every subsequent push_frame raises this. A dropped connection wearing a
+#: state error's clothes.
+#:
+#: `NetworkError` - and note what it is NOT. Every reactor_sdk error derives from
+#: ReactorError, which derives from Exception, NOT from RuntimeError. Code that caught
+#: `(TimeoutError, RuntimeError)` believing it was retrying transport failures was
+#: catching none of them, for the whole life of the project. That is exactly how the
+#: runner's rollout retry looked correct while being unable to catch the most common
+#: failure it existed for.
+TRANSPORT_ERRORS = (
+    DisconnectedError, InvalidStateError, NetworkError, RateLimitedError,
+    RequestTimeoutError, ServerError, SessionTerminalError, TransportError,
+    ConnectionError, OSError, asyncio.TimeoutError,
+)
+
 
 log = logging.getLogger("penumbra.reactor")
 

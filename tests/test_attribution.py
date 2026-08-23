@@ -329,3 +329,72 @@ def test_a_dropped_session_is_retryable_but_a_bad_request_is_not():
     assert issubclass(DisconnectedError, TRANSPORT_ERRORS)
     assert not issubclass(BadRequestError, TRANSPORT_ERRORS)
     assert not issubclass(UnauthorizedError, TRANSPORT_ERRORS)
+
+
+def test_the_category_budget_actually_reaches_the_repair_pass():
+    """The checker worked; the wiring did not, and only a live run revealed it.
+
+    `propose_suite` passed the category's human-readable definition STRING down to
+    `propose`, which handed it to the repair pass as if it were the spec dict. The
+    isinstance(dict) guard then matched nothing and every object prompt sailed through
+    a null-control category - silently, with the run reporting "no repairs needed".
+
+    Testing `_category_violation` in isolation could never catch that. This asserts on
+    the seam instead: whatever `propose_suite` hands down must be the thing that carries
+    `max_objects`.
+    """
+    import inspect
+
+    from penumbra.scenarios import director
+
+    # propose() must take the spec as its own argument, not smuggle it inside `category`.
+    assert "category_spec" in inspect.signature(director.propose).parameters
+
+    src = inspect.getsource(director.propose_suite)
+    assert "category_spec=spec" in src, \
+        "propose_suite must forward the spec dict, not the definition string"
+
+    # And the object that gets forwarded must be one the checker can actually read.
+    spec = director.CATEGORIES["environment"]
+    assert isinstance(spec, dict) and "max_objects" in spec
+    assert director._category_violation("The bowl is full of yogurt.", spec) is not None
+
+
+def test_reactor_transport_failures_are_retryable_and_real_mistakes_are_not():
+    """The bug this pins down was invisible for the life of the project.
+
+    `ExperimentRunner._rollout` caught `(TimeoutError, RuntimeError)` and its docstring
+    said it existed to survive wedged Reactor sessions. It could not: every reactor_sdk
+    error derives from ReactorError -> Exception, never from RuntimeError. The retry
+    read correctly, logged nothing, and caught none of the failures it was for. A run
+    died on NETWORK_ERROR during connect - precisely the case it was meant to survive.
+
+    Catching the shared ReactorError base would over-correct: it also covers genuine
+    mistakes like a malformed request, which must abort rather than be repeated.
+    """
+    import reactor_sdk.errors as E
+
+    from penumbra.reactor.session import TRANSPORT_ERRORS
+
+    for name in ("NetworkError", "DisconnectedError", "InvalidStateError",
+                 "ServerError", "RequestTimeoutError", "SessionTerminalError"):
+        assert issubclass(getattr(E, name), TRANSPORT_ERRORS), name
+        assert not issubclass(getattr(E, name), RuntimeError), \
+            f"{name} is not a RuntimeError - that is the whole bug"
+
+    for name in ("BadRequestError", "UnauthorizedError", "NotFoundError"):
+        assert not issubclass(getattr(E, name), TRANSPORT_ERRORS), \
+            f"{name} is a real mistake and must abort, not retry"
+
+
+def test_both_reactor_callers_use_the_shared_retry_tuple():
+    """The renderer and the policy both talk to Reactor; one having the fix is not enough."""
+    import inspect
+
+    from penumbra.experiments import runner
+    from penumbra.perturbation import x2
+
+    assert "TRANSPORT_ERRORS" in inspect.getsource(runner._rollout_source_probe
+                                                   if hasattr(runner, "_rollout_source_probe")
+                                                   else runner.ExperimentRunner._rollout)
+    assert "TRANSPORT_ERRORS" in inspect.getsource(x2.X2Perturbation._apply_one_resilient)

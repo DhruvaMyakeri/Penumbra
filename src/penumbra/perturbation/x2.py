@@ -42,25 +42,7 @@ from ..episodes.types import PERTURBED_VIEW, Episode
 from pathlib import Path
 
 from ..config import REPO_ROOT
-from reactor_sdk.errors import (
-    DisconnectedError, InvalidStateError, NetworkError, RequestTimeoutError,
-    ServerError, SessionTerminalError, TransportError,
-)
-
-from ..reactor.session import ReactorSession
-
-#: Failures of the connection rather than of the render. Retrying these is legitimate;
-#: retrying a BadRequestError or an UnauthorizedError would just repeat a real mistake,
-#: so those are deliberately absent and still abort the run.
-#:
-#: InvalidStateError earns its place by observation, not by name: when a session leaves
-#: the ready state the publish does not survive, and every subsequent push_frame raises
-#: it. That is a dropped connection wearing a state error's clothes.
-TRANSPORT_ERRORS = (
-    DisconnectedError, InvalidStateError, NetworkError, RequestTimeoutError,
-    ServerError, SessionTerminalError, TransportError, ConnectionError, OSError,
-    __import__("asyncio").TimeoutError,
-)
+from ..reactor.session import ReactorSession, TRANSPORT_ERRORS
 from .spec import FaultSpec
 
 log = logging.getLogger("penumbra.perturbation")
