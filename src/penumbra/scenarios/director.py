@@ -315,9 +315,17 @@ def _parse(text: str) -> list[Scenario]:
     return out
 
 
-REPAIR_INSTRUCTIONS = """You wrote these edit prompts for a video model, and each one
-breaks a rule that is measured rather than stylistic. Rewrite each prompt so it obeys
-every rule, WITHOUT changing which situation is being tested.
+REPAIR_INSTRUCTIONS = """You wrote these test scenarios for a video model, and each one
+breaks a rule that is measured rather than stylistic. Fix each one.
+
+Some breakages are about WORDING - the prompt names two objects when it should name
+one. For those, keep the situation exactly as it is and rewrite only the prompt.
+
+Some are about the SITUATION ITSELF. A scenario in a scene-only category that is really
+about the cup cannot be fixed by rewording, because the situation is the wrong situation
+for that category. For those, change the situation to a genuine instance of what the
+category is for, and write a matching prompt and name. Each entry below says which kind
+it is.
 
 {listing}
 
@@ -336,7 +344,10 @@ Keep them vivid and extreme - a specific colour, material or covering, stated as
 present. A mild prompt gets declined and wastes the scenario just as surely.
 
 Reply with JSON only, an array in the same order, no markdown fence:
-[{{"name": "<the name you were given>", "prompt": "<the rewritten prompt>"}}]
+[{{"name": "<the name you were given, so it can be matched up>",
+  "new_name": "<snake_case name matching the fixed scenario>",
+  "situation": "<the situation, unchanged for a wording fix, replaced for a situation fix>",
+  "prompt": "<the rewritten prompt>"}}]
 """
 
 
@@ -397,14 +408,28 @@ def _repair_prompts(scenarios: list, spec=None) -> tuple[list, list]:
         if cleaned.startswith("```"):
             cleaned = cleaned.split("\n", 1)[1].rsplit("```", 1)[0]
         fixed = json.loads(cleaned[cleaned.find("["): cleaned.rfind("]") + 1])
-        by_name = {str(d.get("name")): str(d.get("prompt", "")).strip() for d in fixed}
+        by_name = {str(d.get("name")): d for d in fixed}
     except Exception as exc:  # noqa: BLE001
         log.warning("prompt repair pass failed: %s", exc)
         return scenarios, [f"prompt repair unavailable: {type(exc).__name__}"]
 
     for s, violations in bad:
-        candidate = by_name.get(s.name, "")
-        if candidate and not rule_violations(candidate):
+        fix = by_name.get(s.name) or {}
+        candidate = str(fix.get("prompt", "")).strip()
+        clean = candidate and not rule_violations(candidate)             and not _category_violation(candidate, spec)
+        if clean:
+            # The SITUATION has to move with the prompt. A repair that rewrites only
+            # the prompt leaves the scenario describing an object while its prompt
+            # describes the table, and anything that later regenerates the prompt from
+            # the situation - the mid-run re-brief does exactly this - reverts the fix
+            # silently. Measured: three null-control scenarios were repaired at
+            # proposal time and were object prompts again by the time they rendered.
+            new_situation = str(fix.get("situation", "")).strip()
+            if new_situation:
+                s.situation = new_situation
+            new_name = str(fix.get("new_name", "")).strip()
+            if new_name and new_name.replace("_", "").isalnum():
+                s.name = new_name
             notes.append(f"{s.name}: rewritten ({violations[0][:70]})")
             s.prompt = candidate
         else:

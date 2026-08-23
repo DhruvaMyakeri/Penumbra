@@ -49,7 +49,7 @@ from ..perturbation.x2 import X2Perturbation
 from ..policy.base import PolicyTrace
 from ..report.run_report import write_reports
 from ..validation.seam import SeamGate, perceptual_distance
-from .director import Scenario, propose_suite
+from .director import CATEGORIES, Scenario, _category_violation, propose_suite
 from .insights import InsightLedger, RenderObservation, prompt_features, rule_violations
 from .judge import judge_views
 from .render_agent import REPAIRABLE, classify, revise_prompt
@@ -704,9 +704,11 @@ class Garage:
                 if not last_attempt and outcome in REPAIRABLE:
                     self._publish(
                         phase_detail=f"rewriting the prompt for {scenario.name}")
+                    extra, validate = self._scenario_constraint(scenario)
                     new_prompt, reasoning = revise_prompt(
                         scenario.situation, scenario.why_it_might_break, history,
-                        brief=self.insights.brief())
+                        brief=self.insights.brief(), extra_rules=extra,
+                        validate=validate)
                     history[-1]["agent_reasoning"] = reasoning
 
                 if last_attempt or not new_prompt or new_prompt == prompt:
@@ -735,6 +737,41 @@ class Garage:
         res.seconds = time.time() - t0
         self._publish()
         return res
+
+    def _scenario_constraint(self, scenario) -> tuple[str, object]:
+        """The category contract for this scenario, as prose and as a validator.
+
+        Both the per-scenario retry loop and the mid-run re-brief rewrite prompts, and
+        neither knew anything about categories. The general advice they carry pushes
+        every prompt toward exactly one manipulable object, which is right for most of
+        the suite and exactly wrong for the two null-control categories that must name
+        none. Measured consequence: three null controls were repaired to scene-only at
+        proposal time and were object prompts again by the time they rendered, so the
+        one claim the suite pre-registers went untested for a third run running.
+        """
+        spec = CATEGORIES.get(getattr(scenario, "category", ""), None)
+        if not isinstance(spec, dict) or "max_objects" not in spec:
+            return "", rule_violations
+
+        budget = spec["max_objects"]
+        text = (
+            f"This scenario is a NULL CONTROL for the '{scenario.category}' category. "
+            f"Its prompt must name AT MOST {budget} manipulable object(s) - no cup, no "
+            f"bowl, no gripper, no container, not even in passing. Change only the "
+            f"table, the surroundings, or the light. This overrides the general advice "
+            f"to aim at one object: the whole purpose of this scenario is to test "
+            f"whether scene-only change moves the policy, and naming an object destroys "
+            f"that test while appearing to satisfy every other rule."
+        )
+
+        def validate(prompt: str) -> list:
+            out = list(rule_violations(prompt))
+            breach = _category_violation(prompt, spec)
+            if breach:
+                out.append(breach)
+            return out
+
+        return text, validate
 
     async def _rebrief(self, episode: Episode) -> None:
         """Rewrite the prompts of situations not yet rendered, using what has been learned.
@@ -766,9 +803,17 @@ class Garage:
                         "outcome": "NOT YET ATTEMPTED",
                         "detail": "rewrite this prompt using what the run has learned "
                                   "about the renderer, keeping the situation identical"}]
+            extra, validate = self._scenario_constraint(res.scenario)
             new_prompt, reasoning = revise_prompt(
                 res.scenario.situation, res.scenario.why_it_might_break, history,
-                brief=brief)
+                brief=brief, extra_rules=extra, validate=validate)
+            # A rewrite that breaks the contract is discarded rather than used. The
+            # director's prompt already satisfied it; a "better" prompt that quietly
+            # removes a control is worse than no rewrite at all.
+            if new_prompt and validate(new_prompt):
+                log.info("re-brief rejected for %s: %s", res.scenario.name,
+                         "; ".join(validate(new_prompt))[:120])
+                new_prompt = ""
             if new_prompt and new_prompt != res.scenario.prompt:
                 res.render_attempts = [{
                     "attempt": 0, "prompt": res.scenario.prompt,

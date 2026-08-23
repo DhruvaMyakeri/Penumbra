@@ -120,7 +120,7 @@ def _describe(attempt: dict) -> str:
 
 
 def _ask(situation: str, why: str, attempts: list[dict], brief: str,
-         correction: str = "") -> tuple[str, str]:
+         correction: str = "", extra: str = "") -> tuple[str, str]:
     """One call to the agent. Returns (prompt, reasoning); ("", reason) on failure."""
     text = INSTRUCTIONS.format(
         situation=situation or "(none given)",
@@ -128,6 +128,15 @@ def _ask(situation: str, why: str, attempts: list[dict], brief: str,
         history="\n".join(_describe(a) for a in attempts),
         capabilities=CAPABILITIES,
     )
+    if extra:
+        # A per-scenario constraint from the caller. It goes ABOVE the general
+        # advice and says so, because the two genuinely conflict: the general
+        # advice pushes every prompt toward one manipulable object, and a
+        # scene-only null control must name none. Without this the agent
+        # helpfully "fixed" three null controls into object prompts and the
+        # control stopped being a control.
+        text += ("\n\nCONSTRAINT ON THIS SCENARIO - it overrides the "
+                 "general advice above wherever the two conflict:\n" + extra)
     if brief:
         text += f"\n\nWHAT THIS RUN HAS LEARNED ABOUT THE RENDERER SO FAR:\n{brief}"
     if correction:
@@ -153,7 +162,8 @@ def _ask(situation: str, why: str, attempts: list[dict], brief: str,
 
 
 def revise_prompt(situation: str, why: str, attempts: list[dict],
-                  brief: str = "") -> tuple[str, str]:
+                  brief: str = "", extra_rules: str = "",
+                  validate=None) -> tuple[str, str]:
     """Rewrite the prompt in light of what the renderer actually did.
 
     Returns (prompt, reasoning). Never raises: if the agent is unreachable the caller
@@ -168,11 +178,12 @@ def revise_prompt(situation: str, why: str, attempts: list[dict],
     returned with the violation recorded, because a rule-breaking prompt that renders
     is still worth more than no attempt at all.
     """
-    prompt, reasoning = _ask(situation, why, attempts, brief)
+    check = validate or rule_violations
+    prompt, reasoning = _ask(situation, why, attempts, brief, extra=extra_rules)
     if not prompt:
         return "", reasoning
 
-    violations = rule_violations(prompt)
+    violations = check(prompt)
     if not violations:
         return prompt, reasoning
 
@@ -184,7 +195,7 @@ def revise_prompt(situation: str, why: str, attempts: list[dict],
         return retry, f"{retry_reasoning} (rewritten after breaking: {violations[0]})"
 
     kept, kept_reason = (retry, retry_reasoning) if retry else (prompt, reasoning)
-    remaining = rule_violations(kept)
+    remaining = check(kept)
     log.info("render agent prompt still breaks %d rule(s): %s",
              len(remaining), "; ".join(remaining)[:160])
     return kept, f"{kept_reason} [WARNING: still breaks {len(remaining)} measured rule(s)]"

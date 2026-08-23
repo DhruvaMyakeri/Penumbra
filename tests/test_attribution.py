@@ -428,3 +428,73 @@ def test_single_camera_runs_do_not_need_coherence():
     r = _result({"credible": True, "verdict": "applied", "coherent": None})
     r.per_view_gate = {"cam1": {}}
     assert r.finding_class == "CONFIRMED"
+
+
+# -- the null control must survive the whole pipeline, not just proposal -------
+
+def test_a_category_fix_rewrites_the_situation_not_only_the_prompt():
+    """Repairing only the prompt is undone by anything that regenerates from the situation.
+
+    Live sequence, three runs in a row: the director proposed object scenarios in the
+    scene-only categories; the repair pass rewrote the PROMPT to "the table is bright
+    yellow plastic" but left the situation describing a bowl; the mid-run re-brief then
+    regenerated a prompt from that situation and got "the bowl is bright yellow plastic"
+    back. The control was correct at proposal time and gone by render time.
+    """
+    import inspect
+
+    from penumbra.scenarios import director
+
+    src = inspect.getsource(director._repair_prompts)
+    assert "s.situation = new_situation" in src, \
+        "a category repair must move the situation, or the fix reverts downstream"
+    # And the repaired prompt has to satisfy the category, not just the prompt rules.
+    assert "_category_violation(candidate, spec)" in src
+
+
+def test_the_rewrite_agents_are_given_the_category_contract():
+    """Both rewrite paths - the per-scenario retry and the mid-run re-brief - carry it."""
+    import inspect
+
+    from penumbra.scenarios.garage import Garage
+
+    for fn in (Garage.run_scenario, Garage._rebrief):
+        assert "extra_rules=extra" in inspect.getsource(fn), fn.__name__
+        assert "validate=validate" in inspect.getsource(fn), fn.__name__
+
+
+def test_a_null_control_scenario_gets_a_zero_object_constraint():
+    from penumbra.scenarios.garage import Garage
+
+    g = Garage.__new__(Garage)          # no I/O; only the pure helper is exercised
+    null = Scenario(name="n", situation="s", why_it_might_break="w", prompt="p",
+                    category="environment")
+    text, validate = g._scenario_constraint(null)
+    assert "NULL CONTROL" in text and "AT MOST 0" in text
+    assert validate("The bowl is bright yellow plastic.")   # rejected
+    assert not validate("The table is bright yellow plastic.")  # allowed
+
+    ordinary = Scenario(name="n", situation="s", why_it_might_break="w", prompt="p",
+                        category="object_appearance")
+    text, validate = g._scenario_constraint(ordinary)
+    assert text == ""
+    assert not validate("The bowl is bright yellow plastic.")
+
+
+def test_revise_prompt_honours_a_caller_supplied_validator(monkeypatch):
+    """The agent's answer is checked against the CALLER's rules, not just the global ones.
+
+    Without this the re-brief accepted "the bowl is yellow plastic" for a scene-only
+    control: it broke no global rule, so nothing objected.
+    """
+    from penumbra.scenarios import render_agent
+
+    answers = iter([("The bowl is bright yellow plastic.", "r1"),
+                    ("The table is bright yellow plastic.", "r2")])
+    monkeypatch.setattr(render_agent, "_ask", lambda *a, **k: next(answers))
+
+    def no_objects(prompt):
+        return ["names an object"] if "bowl" in prompt else []
+
+    prompt, _ = render_agent.revise_prompt("s", "w", [], validate=no_objects)
+    assert prompt == "The table is bright yellow plastic."
