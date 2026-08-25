@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 from reactor_sdk import Reactor, ReactorStatus
 from reactor_sdk.errors import (
-    DisconnectedError, InvalidStateError, NetworkError, RateLimitedError,
+    AbortedError, DisconnectedError, InvalidStateError, NetworkError, RateLimitedError,
     RequestTimeoutError, ServerError, SessionTerminalError, TransportError,
 )
 
@@ -28,6 +28,11 @@ from ..config import reactor_api_key
 #: retrying a BadRequestError or an UnauthorizedError would just repeat a real mistake.
 #: They are enumerated one by one rather than caught via their shared ReactorError base,
 #: because that base also covers those genuine mistakes.
+#:
+#: `AbortedError` was in the abort list until it cost five of twenty-one
+#: situations in one run. It arrives as `connect: [ABORTED] operation aborted`
+#: - the connection attempt being torn down, not a request the server refused.
+#: Transient, and retryable.
 #:
 #: Two of these earn their place by observation rather than by name:
 #:
@@ -42,7 +47,7 @@ from ..config import reactor_api_key
 #: runner's rollout retry looked correct while being unable to catch the most common
 #: failure it existed for.
 TRANSPORT_ERRORS = (
-    DisconnectedError, InvalidStateError, NetworkError, RateLimitedError,
+    AbortedError, DisconnectedError, InvalidStateError, NetworkError, RateLimitedError,
     RequestTimeoutError, ServerError, SessionTerminalError, TransportError,
     ConnectionError, OSError, asyncio.TimeoutError,
 )
