@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PENUMBRA</title>
+<meta name="description" content="Perception fault injection for physical AI. Real robot episodes, generative visual perturbation, measured policy response.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#0D1013; --panel:#13181D; --panel-2:#181E24; --sunk:#0A0D10;
+  --line:#242D36; --line-2:#2F3A45;
+  --ink:#E7EBEF; --dim:#93A0AD; --faint:#5E6B78;
+  --orange:#FF7A1A; --orange-dim:#3A1F0C; --orange-soft:#FFB27A;
+  --teal:#4EC6CC; --teal-dim:#0F2A2C;
+  --green:#7BD389; --green-dim:#15291A;
+  --amber:#F2C14E; --amber-dim:#2E2511;
+  --red:#EC5E62; --red-dim:#2E1416;
+  --display:"Chakra Petch", "Bahnschrift", "DIN Alternate", "Segoe UI", sans-serif;
+  --body:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono:"IBM Plex Mono", "Cascadia Mono", "Consolas", ui-monospace, monospace;
+  --pad: clamp(16px, 4vw, 48px);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:72px;background:var(--ground)}
+body{margin:0;background:var(--ground);color:var(--ink);font:15px/1.6 var(--body);
+  -webkit-font-smoothing:antialiased;
+  background-image:
+    linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+  background-size:32px 32px}
+img,video{max-width:100%;display:block}
+a{color:var(--orange-soft);text-decoration:none}
+a:hover{color:var(--orange)}
+:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}html{scroll-behavior:auto}}
+
+/* ---- byline --------------------------------------------------------- */
+.byline{border-bottom:1px solid var(--line);background:var(--sunk);padding:0 var(--pad)}
+.byline-in{max-width:1320px;margin:0 auto;display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;
+  min-height:34px;padding-block:7px;font:12px/1.4 var(--body);color:var(--faint)}
+.byline b{color:var(--dim);font-weight:500}
+.byline a{color:var(--dim);border-bottom:1px solid var(--line-2)}
+.byline a:hover{color:var(--orange);border-bottom-color:var(--orange)}
+.byline .links{display:flex;flex-wrap:wrap;gap:4px 16px;margin-left:auto}
+.byline .links a{font:500 11px/1.4 var(--display);letter-spacing:.14em;border-bottom:0}
+@media (max-width:720px){.byline .links{margin-left:0}}
+
+/* ---- top bar ---------------------------------------------------------- */
+.bar{position:sticky;top:0;z-index:40;background:rgba(13,16,19,.92);backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--line);padding:env(safe-area-inset-top,0px) var(--pad) 0}
+.bar-in{display:flex;align-items:center;gap:20px;height:60px;max-width:1320px;margin:0 auto}
+.mark{display:flex;align-items:center;gap:11px;font:600 17px/1 var(--display);letter-spacing:.2em}
+.mark svg{flex:none}
+.bar nav{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+.bar nav a{font:500 12px/1 var(--display);letter-spacing:.14em;color:var(--dim);padding:9px 11px;border:1px solid transparent}
+.bar nav a:hover{color:var(--ink);border-color:var(--line-2)}
+.gh{display:inline-flex;align-items:center;gap:8px;font:600 12px/1 var(--display);letter-spacing:.14em;
+  color:var(--ground)!important;background:var(--orange);padding:10px 14px;
+  clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px)}
+.gh:hover{background:var(--orange-soft)}
+@media (max-width:860px){.bar nav a.opt{display:none}}
+
+/* ---- layout primitives ------------------------------------------------ */
+.wrap{max-width:1320px;margin:0 auto;padding:0 var(--pad)}
+section{padding:72px 0 24px}
+.eyebrow{display:flex;align-items:center;gap:12px;font:500 12px/1 var(--display);letter-spacing:.24em;color:var(--orange);margin-bottom:14px}
+.eyebrow::before{content:"";width:22px;height:2px;background:var(--orange)}
+h1,h2,h3{font-family:var(--display);font-weight:600;letter-spacing:.02em;margin:0;text-wrap:balance}
+h2{font-size:clamp(26px,3.4vw,38px);line-height:1.12;max-width:26ch}
+.lede{color:var(--dim);max-width:68ch;margin:14px 0 0;font-size:16px}
+.panel{background:var(--panel);border:1px solid var(--line);position:relative}
+.panel.cut{clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px)}
+.ptitle{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);
+  font:500 11.5px/1 var(--display);letter-spacing:.2em;color:var(--dim);text-transform:uppercase}
+.ptitle .led{display:inline-flex;align-items:center;gap:8px}
+.led::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+.led.o::before{background:var(--orange);box-shadow:0 0 8px var(--orange)}
+.led.t::before{background:var(--teal);box-shadow:0 0 8px var(--teal)}
+.mono{font-family:var(--mono)}
+.num{font-variant-numeric:tabular-nums}
+
+/* ---- hero ------------------------------------------------------------- */
+.hero{padding-block:64px 40px}
+.hero-grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:40px;align-items:center}
+@media (max-width:980px){.hero-grid{grid-template-columns:1fr}}
+.hero h1{font-size:clamp(36px,5.4vw,64px);line-height:1.02;letter-spacing:.01em}
+.hero h1 em{font-style:normal;color:var(--orange)}
+.hero .lede{font-size:17px;margin-top:20px}
+.cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}
+.btn{display:inline-flex;align-items:center;gap:9px;font:600 12.5px/1 var(--display);letter-spacing:.16em;
+  padding:14px 18px;border:1px solid var(--line-2);color:var(--ink)!important;background:var(--panel)}
+.btn:hover{border-color:var(--orange)}
+.btn.primary{background:var(--orange);border-color:var(--orange);color:var(--ground)!important}
+.btn.primary:hover{background:var(--orange-soft)}
+.flow{padding:18px}
+.flow svg{width:100%;height:auto}
+.flow text{font-family:var(--display);letter-spacing:.12em}
+@keyframes dash{to{stroke-dashoffset:-24}}
+.flowline{stroke-dasharray:6 6;animation:dash 1.2s linear infinite}
+
+.tiles{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin-top:44px}
+@media (max-width:980px){.tiles{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:520px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tile{background:var(--panel);padding:18px 18px 16px}
+.tile .k{font:500 11px/1.3 var(--display);letter-spacing:.18em;color:var(--faint);text-transform:uppercase}
+.tile .v{font:600 clamp(26px,3vw,36px)/1.1 var(--display);margin-top:10px}
+.tile .s{font-size:12px;color:var(--dim);margin-top:4px}
+.tile.hi .v{color:var(--orange)}
+
+/* ---- policy section --------------------------------------------------- */
+.two{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:20px;margin-top:32px;align-items:start}
+@media (max-width:980px){.two{grid-template-columns:1fr}}
+.chanrow{display:flex;gap:4px;flex-wrap:wrap;padding:12px 16px 0}
+.chan{font:500 11.5px/1 var(--display);letter-spacing:.12em;padding:8px 10px;background:var(--sunk);border:1px solid var(--line);color:var(--dim);cursor:pointer}
+.chan[aria-pressed="true"]{border-color:var(--orange);color:var(--orange);background:var(--orange-dim)}
+.chart{padding:8px 12px 12px}
+.chart svg{width:100%;height:auto;display:block}
+.cap{padding:0 16px 16px;color:var(--dim);font-size:13px}
+.readout{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:1px;background:var(--line);border-top:1px solid var(--line)}
+.readout div{background:var(--panel-2);padding:10px 6px;text-align:center}
+.readout b{display:block;font:500 10px/1 var(--display);letter-spacing:.14em;color:var(--faint)}
+.readout span{display:block;font:500 13px/1.2 var(--mono);margin-top:6px}
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;margin-top:32px}
+@media (max-width:860px){.steps{grid-template-columns:1fr}}
+.step{padding:22px}
+.step .n{font:600 13px/1 var(--display);letter-spacing:.2em;color:var(--orange)}
+.step h3{font-size:19px;margin:12px 0 8px}
+.step p{margin:0;color:var(--dim);font-size:14px}
+.step .fig{margin-top:16px;padding:12px;background:var(--sunk);border:1px solid var(--line);font:13px/1.55 var(--mono);color:var(--ink)}
+.fig .o{color:var(--orange)} .fig .t{color:var(--teal)} .fig .d{color:var(--faint)}
+
+/* ---- findings --------------------------------------------------------- */
+.featured{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-top:32px}
+@media (max-width:980px){.featured{grid-template-columns:1fr}}
+.feat{display:flex;flex-direction:column;cursor:pointer}
+.feat:hover{border-color:var(--line-2)}
+.viewer{position:relative;background:#000;border-bottom:1px solid var(--line)}
+.viewer video{width:100%;height:auto}
+.viewer .tag{position:absolute;left:8px;font:600 10px/1 var(--display);letter-spacing:.18em;padding:5px 7px;background:rgba(10,13,16,.82);border-left:2px solid var(--teal);color:var(--ink)}
+.viewer .tag.t1{top:8px}
+.viewer .tag.t2{top:calc(50% + 8px);border-left-color:var(--orange)}
+.viewer .cams{position:absolute;right:8px;top:8px;display:flex;gap:4px}
+.viewer .cams span{font:500 9.5px/1 var(--display);letter-spacing:.14em;padding:4px 6px;background:rgba(10,13,16,.82);color:var(--dim)}
+.fbody{padding:18px 18px 16px;display:flex;flex-direction:column;gap:14px;flex:1}
+.fhead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.fname{font:600 19px/1.2 var(--display);letter-spacing:.03em;word-break:break-word}
+.fsit{color:var(--dim);font-size:14px;margin:0}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{font:600 10.5px/1 var(--display);letter-spacing:.16em;padding:6px 8px;white-space:nowrap;border:1px solid}
+.c-shift{color:var(--orange);border-color:var(--orange);background:var(--orange-dim)}
+.c-ver{color:var(--green);border-color:var(--green);background:var(--green-dim)}
+.c-grip{color:var(--ground);border-color:var(--orange);background:var(--orange)}
+.c-match{color:var(--green);border-color:#2E5A36;background:var(--green-dim)}
+.c-part{color:var(--teal);border-color:#23575A;background:var(--teal-dim)}
+.c-vary{color:var(--amber);border-color:#5A4A1C;background:var(--amber-dim)}
+.c-none{color:var(--faint);border-color:var(--line-2);background:var(--sunk)}
+.c-rej{color:var(--red);border-color:var(--red);background:var(--red-dim)}
+.c-held{color:var(--teal);border-color:var(--teal);background:var(--teal-dim)}
+.meters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line)}
+.meter{background:var(--panel-2);padding:12px}
+.meter .k{font:500 10px/1.3 var(--display);letter-spacing:.16em;color:var(--faint);text-transform:uppercase}
+.meter .v{font:600 20px/1.1 var(--mono);margin-top:7px}
+.meter .v small{font-size:12px;color:var(--dim);font-weight:500}
+.bars{margin-top:9px;display:grid;gap:4px}
+.bars i{display:block;height:5px;background:var(--line-2);position:relative}
+.bars i::after{content:"";position:absolute;inset:0 auto 0 0;width:var(--w);background:var(--c)}
+.observed{font-size:13px;color:var(--dim);border-left:2px solid var(--line-2);padding:2px 0 2px 12px;margin:0}
+.observed b{color:var(--ink);font-weight:500}
+
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:48px 0 16px}
+.toolbar .lbl{font:500 11px/1 var(--display);letter-spacing:.2em;color:var(--faint);margin-right:4px}
+.seg{display:flex;flex-wrap:wrap;gap:4px}
+.seg button{font:500 11.5px/1 var(--display);letter-spacing:.12em;padding:8px 10px;background:var(--panel);border:1px solid var(--line);color:var(--dim);cursor:pointer}
+.seg button[aria-pressed="true"]{border-color:var(--orange);color:var(--orange);background:var(--orange-dim)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:16px}
+.card{cursor:pointer;display:flex;flex-direction:column;transition:border-color .15s}
+.card:hover{border-color:var(--orange)}
+.card .thumb{position:relative;background:#000;border-bottom:1px solid var(--line)}
+.card .thumb img,.card .thumb video{width:100%;height:auto}
+.card .thumb .dval{position:absolute;right:8px;bottom:8px;font:600 12px/1 var(--mono);padding:5px 7px;background:rgba(10,13,16,.86);color:var(--orange)}
+.card .cb{padding:13px 14px 14px;display:flex;flex-direction:column;gap:9px;flex:1}
+.card .cn{font:600 15px/1.25 var(--display);letter-spacing:.03em;word-break:break-word}
+.card .cm{display:flex;justify-content:space-between;gap:8px;font:12px/1.3 var(--mono);color:var(--dim)}
+.card .cm b{color:var(--ink);font-weight:500}
+.suite-tag{font:500 10.5px/1 var(--display);letter-spacing:.14em;color:var(--faint)}
+
+/* ---- suites table ----------------------------------------------------- */
+.tablewrap{overflow-x:auto;margin-top:28px;border:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:760px}
+th{text-align:left;font:500 10.5px/1.3 var(--display);letter-spacing:.18em;color:var(--faint);padding:12px 14px;border-bottom:1px solid var(--line);background:var(--panel-2);text-transform:uppercase}
+td{padding:12px 14px;border-bottom:1px solid var(--line);background:var(--panel);font-variant-numeric:tabular-nums}
+tr:last-child td{border-bottom:0}
+td.mono{font-family:var(--mono);font-size:13px}
+.pip{display:inline-block;height:8px;background:var(--orange);vertical-align:middle;margin-right:8px}
+
+/* ---- established ------------------------------------------------------ */
+.est{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-top:32px}
+@media (max-width:860px){.est{grid-template-columns:1fr}}
+.est .panel{padding:22px}
+.est .big{font:600 34px/1 var(--display);color:var(--orange)}
+.est h3{font-size:18px;margin:12px 0 8px}
+.est p{margin:0;color:var(--dim);font-size:14px}
+.scope{margin-top:20px;padding:16px 20px;border:1px dashed var(--line-2);color:var(--dim);font-size:13.5px;max-width:92ch}
+.scope b{color:var(--ink);font-weight:500}
+
+footer{border-top:1px solid var(--line);margin-top:72px;padding:36px var(--pad) calc(36px + env(safe-area-inset-bottom,0px))}
+.foot{max-width:1320px;margin:0 auto;display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between;align-items:center;color:var(--dim);font-size:13px}
+
+/* ---- detail drawer ---------------------------------------------------- */
+dialog{border:1px solid var(--line-2);background:var(--panel);color:var(--ink);padding:0;width:min(1120px,calc(100vw - 24px));max-height:calc(100vh - 32px)}
+dialog::backdrop{background:rgba(5,7,9,.78);backdrop-filter:blur(3px)}
+.dhead{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);z-index:2}
+.dhead .x{background:none;border:1px solid var(--line-2);color:var(--ink);font:600 12px/1 var(--display);letter-spacing:.14em;padding:9px 12px;cursor:pointer}
+.dhead .x:hover{border-color:var(--orange)}
+.dbody{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:0}
+@media (max-width:900px){.dbody{grid-template-columns:1fr}}
+.dleft{border-right:1px solid var(--line)}
+.dsec{padding:16px 18px;border-bottom:1px solid var(--line)}
+.dsec:last-child{border-bottom:0}
+.dsec h4{margin:0 0 9px;font:500 10.5px/1 var(--display);letter-spacing:.2em;color:var(--faint);text-transform:uppercase}
+.dsec p{margin:0;font-size:14px;color:var(--dim)}
+.prompt{font:13px/1.55 var(--mono);background:var(--sunk);border:1px solid var(--line);padding:10px 12px;color:var(--ink)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px}
+.kv dt{color:var(--faint);font-family:var(--display);letter-spacing:.1em;font-size:11px;text-transform:uppercase;padding-top:2px}
+.kv dd{margin:0;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.camrow{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px;margin-top:10px}
+.camrow b{font:500 10.5px/1.6 var(--display);letter-spacing:.14em;color:var(--dim)}
+.empty{padding:40px;text-align:center;color:var(--faint);border:1px dashed var(--line-2)}
+</style>
+</head>
+<body>
+
+<div class="byline">
+  <div class="byline-in">
+    <span>Built by <b>Dhruva Myakeri</b>. Check out more of my work at <a href="https://latent-archive.vercel.app" target="_blank" rel="noopener">latent-archive.vercel.app</a></span>
+    <span class="links">
+      <a href="https://github.com/DhruvaMyakeri" target="_blank" rel="noopener">GITHUB</a>
+      <a href="https://x.com/LatentDhruva" target="_blank" rel="noopener">X</a>
+      <a href="mailto:zapdhruva@gmail.com">ZAPDHRUVA@GMAIL.COM</a>
+    </span>
+  </div>
+</div>
+
+<header class="bar">
+  <div class="bar-in">
+    <a class="mark" href="#top" aria-label="PENUMBRA home">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <circle cx="13" cy="13" r="11.5" fill="none" stroke="#FF7A1A" stroke-width="1.5"/>
+        <path d="M13 1.5a11.5 11.5 0 0 1 0 23z" fill="#FF7A1A"/>
+        <circle cx="13" cy="13" r="3" fill="#0D1013" stroke="#FF7A1A" stroke-width="1.5"/>
+      </svg>
+      <span style="color:var(--ink)">PENUMBRA</span>
+    </a>
+    <nav aria-label="Sections">
+      <a href="#policy" class="opt">POLICY</a>
+      <a href="#method" class="opt">METHOD</a>
+      <a href="#findings">FINDINGS</a>
+      <a href="#suites" class="opt">SUITES</a>
+      <a class="gh" id="ghTop" href="#" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        GITHUB
+      </a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <div class="wrap hero">
+    <div class="hero-grid">
+      <div>
+        <div class="eyebrow">PERCEPTION FAULT INJECTION · PHYSICAL AI</div>
+        <h1>Change what the robot <em>sees</em>. Measure how its plan <em>moves</em>.</h1>
+        <p class="lede">PENUMBRA takes a real robot recording, repaints what the cameras see with a generative video model, and replays it to a vision-language-action policy. Physics, geometry and motion stay real. Only appearance changes. Then it measures, with a statistical test against a matched control, whether the policy's intended actions shift.</p>
+        <div class="cta">
+          <a class="btn primary" href="#findings">VIEW FINDINGS</a>
+          <a class="btn" id="ghHero" href="#" target="_blank" rel="noopener">SOURCE ON GITHUB</a>
+        </div>
+      </div>
+      <div class="panel cut">
+        <div class="ptitle"><span class="led o">PIPELINE</span><span class="mono" style="letter-spacing:.08em">LIVE LOOP</span></div>
+        <div class="flow" id="flow"></div>
+      </div>
+    </div>
+    <div class="tiles" id="tiles"></div>
+  </div>
+
+  <section id="policy">
+    <div class="wrap">
+      <div class="eyebrow">01 · THE POLICY UNDER TEST</div>
+      <h2>A robot brain that turns camera frames into joint targets</h2>
+      <p class="lede">The policy is <span class="mono" id="policyName"></span>, a trained vision-language-action model. Ten times a second it reads three camera views and the arm's joint state, and predicts where the arm should go over the next 32 moments: seven joint angles and one gripper command. Below is its real output on the unmodified recording, across six independent runs.</p>
+      <div class="two">
+        <div class="panel">
+          <div class="ptitle"><span class="led t">JOINT TELEMETRY · 6 UNPERTURBED RUNS</span><span id="chanUnit" class="mono"></span></div>
+          <div class="chanrow" id="chans" role="group" aria-label="Channel"></div>
+          <div class="chart" id="chart"></div>
+          <p class="cap">Each line is one run of the policy on the same recording. They do not overlap perfectly: the policy samples, so it never answers identically twice. That spread is the noise floor every result is measured against.</p>
+          <div class="readout" id="readout"></div>
+        </div>
+        <div class="panel">
+          <div class="ptitle"><span class="led t">ONE PREDICTION</span><span class="mono">32 × 8</span></div>
+          <div class="chart" id="heat"></div>
+          <p class="cap">A single prediction: 32 future steps (rows) by 8 channels (columns). Colour is each channel's value relative to its own range. The policy emits one of these at every control step.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="method">
+    <div class="wrap">
+      <div class="eyebrow">02 · HOW A SHIFT IS MEASURED</div>
+      <h2>Crowds of runs, a matched control, and a shuffle test</h2>
+      <p class="lede">A single before-and-after comparison proves nothing when the policy disagrees with itself. So every situation is judged as a group of rollouts against a group of control rollouts, with the video model's own fingerprint cancelled out.</p>
+      <div class="steps">
+        <div class="panel step">
+          <div class="n">STEP A</div>
+          <h3>Render a no-op control</h3>
+          <p>The episode is passed through the same video model with a prompt asking for no change. Every situation is compared against this, not the raw recording, so re-rendering artefacts land on both sides and cancel.</p>
+          <div class="fig"><span class="d">control prompt</span><br>"the scene is exactly as it is,<br>&nbsp;no changes"</div>
+        </div>
+        <div class="panel step">
+          <div class="n">STEP B</div>
+          <h3>Gate every render</h3>
+          <p>Before the policy sees a frame, a validity gate checks optical-flow drift, structure and temporal motion. A render that moved the scene instead of repainting it is rejected, and an independent vision model reports what each render actually shows.</p>
+          <div class="fig"><span class="d">bar calibrated on real shifts</span><br>2 px shift&nbsp;&nbsp;<span class="t">0.0027</span><br>threshold&nbsp;&nbsp;&nbsp;<span class="o">0.0055</span><br>4 px shift&nbsp;&nbsp;0.0055</div>
+        </div>
+        <div class="panel step">
+          <div class="n">STEP C</div>
+          <h3>Test the groups</h3>
+          <p>Control and situation rollouts are pooled and their labels shuffled 5,000 times. If random labellings almost never separate as far as the real ones, the shift is real. Two statistics are tested: the arm trajectory and the grasp decision.</p>
+          <div class="fig"><span class="d">natural wobble, 15 pairs</span><br>arm plan&nbsp;&nbsp;<span class="t" id="nfArm"></span><br>grasp&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="t" id="nfGrip"></span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="findings">
+    <div class="wrap">
+      <div class="eyebrow">03 · FINDINGS</div>
+      <h2 id="findTitle">Situations that moved the policy</h2>
+      <p class="lede">Each video shows the original camera views on top and the repainted views below, frame for frame. The panel beside it reports how far the policy's plan moved compared with the control. The vision check records what an independent model observed in the render.</p>
+      <div class="featured" id="featured"></div>
+
+      <div class="toolbar">
+        <span class="lbl">SUITE</span><div class="seg" id="suiteSeg" role="group" aria-label="Suite"></div>
+      </div>
+      <div class="toolbar" style="margin-top:0">
+        <span class="lbl">SORT</span>
+        <div class="seg" id="sortSeg" role="group" aria-label="Sort">
+          <button data-s="d" aria-pressed="true">EFFECT SIZE</button>
+          <button data-s="arm" aria-pressed="false">ARM SHIFT</button>
+          <button data-s="grip" aria-pressed="false">GRASP CHANGE</button>
+          <button data-s="suite" aria-pressed="false">SUITE ORDER</button>
+        </div>
+      </div>
+      <div class="grid" id="grid"></div>
+
+      <div style="margin-top:64px">
+        <div class="eyebrow">03B · CONTRAST CASES</div>
+        <h2>Where the system held the line</h2>
+        <p class="lede">Not every render gets through, and not every change moves the policy. These show the validity gate rejecting renders that distorted the scene, and the policy holding steady through changes it had no reason to react to.</p>
+        <div class="grid" id="contrast" style="margin-top:28px"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="suites">
+    <div class="wrap">
+      <div class="eyebrow">04 · SUITES</div>
+      <h2>Every completed suite</h2>
+      <p class="lede">A suite is one full sweep: a language model proposes situations for the task, each is rendered, gated, and tested against that suite's control. All figures below come from the run records.</p>
+      <div class="tablewrap"><table id="suiteTable"></table></div>
+    </div>
+  </section>
+
+  <section id="established">
+    <div class="wrap">
+      <div class="eyebrow">05 · WHAT IT ESTABLISHED</div>
+      <h2>What PENUMBRA has shown so far</h2>
+      <div class="est" id="est"></div>
+      <p class="scope"><b>Scope.</b> Results measure the policy's intended actions in open-loop replay on one recorded episode; the robot is never allowed to act on them. Situation names describe what was requested of the renderer, and the vision check beside each result records what the render actually showed.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="foot">
+    <span>PENUMBRA · perception fault injection for physical AI. Every figure on this page comes from a logged run.</span>
+    <a class="btn" id="ghFoot" href="#" target="_blank" rel="noopener">GITHUB REPOSITORY</a>
+  </div>
+</footer>
+
+<dialog id="detail" aria-labelledby="dTitle"></dialog>
+
+<script src="assets/data.js"></script>
+<script>
+(function () {
+  "use strict";
+  var D = window.PENUMBRA;
+  if (!D) { document.body.insertAdjacentHTML("afterbegin", '<p class="empty">assets/data.js is missing. Run tools/build_demo.py.</p>'); return; }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var deg = function (r) { return r * 180 / Math.PI; };
+  var clean = function (s) { return String(s == null ? "" : s).replace(/\s*\u2014\s*/g, ", ").replace(/\u2013/g, "-"); };
+  var esc = function (s) { return clean(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+  var fmtP = function (p) { return p == null ? "n/a" : (p < 0.001 ? "<0.001" : p.toFixed(4)); };
+  var pretty = function (n) { return String(n || "").replace(/_/g, " "); };
+  var CAM = { exterior_image_1_left: "EXT 1", exterior_image_2_left: "EXT 2", wrist_image_left: "WRIST" };
+
+  ["ghTop", "ghHero", "ghFoot"].forEach(function (id) { $(id).href = D.repo; });
+  $("policyName").textContent = D.policy;
+
+  var suiteById = {};
+  D.suites.forEach(function (s) { suiteById[s.id] = s; });
+  var shifts = D.scenarios.filter(function (s) { return !s.contrast; });
+  var contrast = D.scenarios.filter(function (s) { return s.contrast; });
+
+  // ---- pipeline diagram ----------------------------------------------------
+  (function () {
+    var nodes = [
+      ["REAL EPISODE", "DROID recording", "#4EC6CC"],
+      ["X2 RENDER", "appearance only", "#FF7A1A"],
+      ["VALIDITY GATE", "drift · structure", "#F2C14E"],
+      ["VLA POLICY", "32 × 8 actions", "#4EC6CC"],
+      ["SHUFFLE TEST", "vs no-op control", "#FF7A1A"],
+      ["REPORT", "video · stats · check", "#7BD389"]
+    ];
+    var W = 520, rowH = 62, H = nodes.length * rowH + 10, x = 150, bw = 220, bh = 42;
+    var s = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Pipeline: real episode, X2 render, validity gate, policy, shuffle test, report">';
+    nodes.forEach(function (n, i) {
+      var y = 8 + i * rowH;
+      if (i < nodes.length - 1) {
+        s += '<line class="flowline" x1="' + (x + bw / 2) + '" y1="' + (y + bh) + '" x2="' + (x + bw / 2) + '" y2="' + (y + rowH) + '" stroke="' + n[2] + '" stroke-width="2"/>';
+      }
+      s += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + bh + '" fill="#181E24" stroke="' + n[2] + '" stroke-width="1.2"/>';
+      s += '<rect x="' + x + '" y="' + y + '" width="4" height="' + bh + '" fill="' + n[2] + '"/>';
+      s += '<text x="' + (x + 16) + '" y="' + (y + 18) + '" fill="#E7EBEF" font-size="12.5" font-weight="600">' + n[0] + "</text>";
+      s += '<text x="' + (x + 16) + '" y="' + (y + 33) + '" fill="#93A0AD" font-size="10.5">' + n[1] + "</text>";
+      s += '<text x="' + (x - 16) + '" y="' + (y + 26) + '" fill="#5E6B78" font-size="11" text-anchor="end">0' + (i + 1) + "</text>";
+    });
+    s += '<text x="' + (x + bw + 18) + '" y="' + (8 + rowH + 26) + '" fill="#93A0AD" font-size="10.5">one prompt</text>';
+    s += '<text x="' + (x + bw + 18) + '" y="' + (8 + 3 * rowH + 26) + '" fill="#93A0AD" font-size="10.5">6 rollouts</text>';
+    s += '<text x="' + (x + bw + 18) + '" y="' + (8 + 4 * rowH + 26) + '" fill="#93A0AD" font-size="10.5">5,000 shuffles</text>';
+    s += "</svg>";
+    $("flow").innerHTML = s;
+  })();
+
+  // ---- headline tiles --------------------------------------------------------
+  (function () {
+    var t = D.totals;
+    var maxD = Math.max.apply(null, shifts.map(function (s) { return s.stats.d || 0; }));
+    var grip = shifts.filter(function (s) { return s.stats.sig_grip; }).length;
+    var rollouts = D.scenarios.reduce(function (a, s) { return a + (s.rollouts || 0); }, 0);
+    var cells = [
+      ["Suites run", t.suites, "full sweeps", false],
+      ["Situations proposed", t.proposed, "by the director", false],
+      ["Rendered and tested", t.tested, "passed the gate", false],
+      ["Policy shifts", t.shifted, "after suite-wide correction", true],
+      ["Largest effect", "d " + maxD.toFixed(2), "Cohen's d vs control", true],
+      ["Grasp decisions changed", grip, "gripper test significant", false]
+    ];
+    $("tiles").innerHTML = cells.map(function (c) {
+      return '<div class="tile' + (c[3] ? " hi" : "") + '"><div class="k">' + c[0] + '</div><div class="v num">' + c[1] + '</div><div class="s">' + c[2] + "</div></div>";
+    }).join("");
+    $("findTitle").textContent = t.shifted + " situations that moved the policy";
+  })();
+
+  // ---- telemetry chart -------------------------------------------------------
+  var CHANNELS = ["J1", "J2", "J3", "J4", "J5", "J6", "J7", "GRIP"];
+  var chan = 1;
+  function drawChart() {
+    var R = D.telemetry.rollouts, steps = R[0].length;
+    var isGrip = chan === 7;
+    var val = function (v) { return isGrip ? v : deg(v); };
+    var series = R.map(function (r) { return r.map(function (a) { return val(a[chan]); }); });
+    var all = [].concat.apply([], series);
+    var lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
+    var padv = (hi - lo) * 0.18 || 1; lo -= padv; hi += padv;
+    var W = 640, H = 262, L = 48, Rr = 12, T = 14, B = 44;
+    var X = function (i) { return L + i * (W - L - Rr) / (steps - 1); };
+    var Y = function (v) { return T + (hi - v) * (H - T - B) / (hi - lo); };
+    var s = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + CHANNELS[chan] + ' across 12 control steps for 6 runs">';
+    for (var g = 0; g <= 4; g++) {
+      var gv = lo + (hi - lo) * g / 4, gy = Y(gv);
+      s += '<line x1="' + L + '" x2="' + (W - Rr) + '" y1="' + gy + '" y2="' + gy + '" stroke="#242D36"/>';
+      s += '<text x="' + (L - 8) + '" y="' + (gy + 4) + '" fill="#5E6B78" font-size="10.5" font-family="IBM Plex Mono,monospace" text-anchor="end">' + gv.toFixed(isGrip ? 2 : 1) + "</text>";
+    }
+    for (var i = 0; i < steps; i++) {
+      s += '<text x="' + X(i) + '" y="' + (H - 26) + '" fill="#5E6B78" font-size="10.5" font-family="IBM Plex Mono,monospace" text-anchor="middle">' + (i + 1) + "</text>";
+    }
+    series.forEach(function (sr) {
+      s += '<polyline fill="none" stroke="#4EC6CC" stroke-opacity=".55" stroke-width="1.6" points="' + sr.map(function (v, i) { return X(i) + "," + Y(v); }).join(" ") + '"/>';
+    });
+    var mean = series[0].map(function (_, i) { return series.reduce(function (a, sr) { return a + sr[i]; }, 0) / series.length; });
+    s += '<polyline fill="none" stroke="#FF7A1A" stroke-width="2.4" points="' + mean.map(function (v, i) { return X(i) + "," + Y(v); }).join(" ") + '"/>';
+    s += '<circle cx="' + X(steps - 1) + '" cy="' + Y(mean[steps - 1]) + '" r="4" fill="#FF7A1A"/>';
+    s += '<text x="' + ((L + W - Rr) / 2) + '" y="' + (H - 6) + '" fill="#5E6B78" font-size="10" font-family="Chakra Petch,sans-serif" letter-spacing="1.5" text-anchor="middle">CONTROL STEP</text>';
+    s += "</svg>";
+    $("chart").innerHTML = s;
+    $("chanUnit").textContent = isGrip ? "GRIPPER 0 OPEN · 1 CLOSED" : "DEGREES";
+    $("chans").querySelectorAll("button").forEach(function (b) { b.setAttribute("aria-pressed", String(+b.dataset.c === chan)); });
+  }
+  $("chans").innerHTML = CHANNELS.map(function (c, i) { return '<button class="chan" data-c="' + i + '">' + c + "</button>"; }).join("");
+  $("chans").addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) { chan = +b.dataset.c; drawChart(); } });
+  drawChart();
+
+  (function () {
+    var last = D.telemetry.rollouts[0][D.telemetry.rollouts[0].length - 1];
+    $("readout").innerHTML = last.map(function (v, i) {
+      return "<div><b>" + CHANNELS[i] + "</b><span>" + (i === 7 ? v.toFixed(2) : deg(v).toFixed(1) + "°") + "</span></div>";
+    }).join("");
+  })();
+
+  (function () {
+    var C = D.telemetry.chunk, rows = C.length, cols = 8;
+    var W = 360, H = 330, L = 30, T = 22, cw = (W - L - 6) / cols, ch = (H - T - 8) / rows;
+    var mins = [], maxs = [];
+    for (var j = 0; j < cols; j++) {
+      var col = C.map(function (r) { return r[j]; });
+      mins.push(Math.min.apply(null, col)); maxs.push(Math.max.apply(null, col));
+    }
+    var mix = function (t) {
+      var a = [15, 42, 44], b = [255, 122, 26];
+      var r = a.map(function (x, k) { return Math.round(x + (b[k] - x) * t); });
+      return "rgb(" + r.join(",") + ")";
+    };
+    var s = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="One 32 by 8 action prediction">';
+    for (var j2 = 0; j2 < cols; j2++) {
+      s += '<text x="' + (L + j2 * cw + cw / 2) + '" y="14" fill="#93A0AD" font-size="10" font-family="Chakra Petch,sans-serif" text-anchor="middle" letter-spacing="1">' + CHANNELS[j2] + "</text>";
+    }
+    C.forEach(function (r, i) {
+      if (i % 4 === 0) s += '<text x="' + (L - 6) + '" y="' + (T + i * ch + ch - 1) + '" fill="#5E6B78" font-size="9.5" font-family="IBM Plex Mono,monospace" text-anchor="end">' + (i + 1) + "</text>";
+      r.forEach(function (v, j) {
+        var t = maxs[j] > mins[j] ? (v - mins[j]) / (maxs[j] - mins[j]) : 0.5;
+        s += '<rect x="' + (L + j * cw + 1) + '" y="' + (T + i * ch) + '" width="' + (cw - 2) + '" height="' + (ch - 1) + '" fill="' + mix(t) + '"/>';
+      });
+    });
+    s += "</svg>";
+    $("heat").innerHTML = s;
+  })();
+
+  (function () {
+    var nf = D.suites[D.suites.length - 1].noise_floor || {};
+    $("nfArm").textContent = deg(nf.joint_l2_mean || 0).toFixed(1) + "° ± " + deg(nf.joint_l2_std || 0).toFixed(1) + "°";
+    $("nfGrip").textContent = ((nf.gripper_flip_rate_mean || 0) * 100).toFixed(1) + "% of steps flip";
+  })();
+
+  // ---- cards ------------------------------------------------------------------
+  function visionChip(s) {
+    if (s.klass === "CONFIRMED") return '<span class="chip c-ver">VERIFIED ON BOTH CAMERAS</span>';
+    var v = (s.vision || {}).verdict;
+    if (v === "applied") return '<span class="chip c-match">RENDER MATCHES PROMPT</span>';
+    if (v === "partially_applied") return '<span class="chip c-part">PARTIAL MATCH</span>';
+    if (v === "something_else") return '<span class="chip c-vary">RENDER VARIED</span>';
+    if (v === "not_applied") return '<span class="chip c-vary">SUBTLE RENDER</span>';
+    return '<span class="chip c-none">NOT ADJUDICATED</span>';
+  }
+  function statusChip(s) {
+    if (s.klass === "REJECTED") return '<span class="chip c-rej">GATE REJECTED</span>';
+    if (s.klass === "NO EFFECT") return '<span class="chip c-held">POLICY HELD</span>';
+    if (s.klass === "DECLINED") return '<span class="chip c-none">NO VISIBLE EDIT</span>';
+    var out = '<span class="chip c-shift">POLICY SHIFT</span>';
+    if (s.stats && s.stats.sig_grip) out += '<span class="chip c-grip">GRASP CHANGED</span>';
+    return out;
+  }
+  function camsFor(s) { return (suiteById[s.suite] || {}).views || []; }
+  function viewer(s, autoplay) {
+    if (!s.video) return '<div class="viewer"><div class="empty">no media</div></div>';
+    var grid = s.layout !== "single";
+    var cams = grid ? camsFor(s).map(function (v) { return "<span>" + (CAM[v] || v) + "</span>"; }).join("") : "<span>SINGLE VIEW</span>";
+    var dims = s.w ? ' width="' + s.w + '" height="' + s.h + '"' : "";
+    return '<div class="viewer"><video data-src="' + s.video + '" data-poster="' + (s.poster || "") + '"' + dims +
+      ' muted loop playsinline preload="none"' + (autoplay ? " data-auto" : "") + "></video>" +
+      (grid ? '<span class="tag t1">ORIGINAL</span><span class="tag t2">REPAINTED</span>'
+            : '<span class="tag t1" style="border-left-color:var(--orange)">REPAINTED</span>') +
+      '<div class="cams">' + cams + "</div></div>";
+  }
+  function meters(st) {
+    if (!st) return "";
+    var a = deg(st.between), w = deg(st.within), top = Math.max(a, w, 1);
+    var gb = (st.gb || 0) * 100, gw = (st.gw || 0) * 100, gtop = Math.max(gb, gw, 5);
+    var d = st.d || 0;
+    return '<div class="meters">' +
+      '<div class="meter"><div class="k">Arm plan vs control</div><div class="v num">' + a.toFixed(1) + '°<small> / ' + w.toFixed(1) + '° natural</small></div>' +
+        '<div class="bars"><i style="--w:' + (a / top * 100) + '%;--c:var(--orange)"></i><i style="--w:' + (w / top * 100) + '%;--c:var(--teal)"></i></div></div>' +
+      '<div class="meter"><div class="k">Grasp flips</div><div class="v num">' + gb.toFixed(0) + '%<small> / ' + gw.toFixed(0) + '% natural</small></div>' +
+        '<div class="bars"><i style="--w:' + (gb / gtop * 100) + '%;--c:var(--orange)"></i><i style="--w:' + (gw / gtop * 100) + '%;--c:var(--teal)"></i></div></div>' +
+      '<div class="meter"><div class="k">Effect · p</div><div class="v num">' + (d >= 0 ? "+" : "") + d.toFixed(2) + '<small> · p ' + fmtP(st.p) + '</small></div>' +
+        '<div class="bars"><i style="--w:' + Math.min(100, Math.max(0, d) / 4.5 * 100) + '%;--c:var(--orange)"></i><i style="--w:' + (st.n / 6 * 100) + '%;--c:var(--line-2)"></i></div></div>' +
+      "</div>";
+  }
+  function observed(s) {
+    var v = s.vision;
+    if (!v || !v.observed) return "";
+    return '<p class="observed"><b>Vision check:</b> ' + esc(v.observed) + "</p>";
+  }
+
+  function featuredCard(s) {
+    return '<article class="panel feat" data-k="' + s.suite + "/" + s.name + '" tabindex="0">' + viewer(s, true) +
+      '<div class="fbody"><div class="fhead"><div><div class="suite-tag">' + s.suite + " · " + esc(pretty(s.category)).toUpperCase() + '</div><div class="fname">' + esc(pretty(s.name)) + "</div></div></div>" +
+      '<div class="chips">' + statusChip(s) + visionChip(s) + "</div>" +
+      '<p class="fsit">' + esc(s.situation) + "</p>" + meters(s.stats) + observed(s) + "</div></article>";
+  }
+  function card(s) {
+    var st = s.stats;
+    var metric = st ? '<div class="cm"><span>arm <b>' + deg(st.between).toFixed(1) + "°</b> vs " + deg(st.within).toFixed(1) + "°</span><span>grasp <b>" + ((st.gb || 0) * 100).toFixed(0) + "%</b></span><span>p <b>" + fmtP(st.p) + "</b></span></div>" :
+      (s.gate && s.gate.drift_px != null ? '<div class="cm"><span>scene drift <b>' + Number(s.gate.drift_px).toFixed(1) + " px</b></span><span>gate <b>" + esc(s.gate.status) + "</b></span></div>" : "");
+    var thumb = s.poster ? '<img data-src="' + s.poster + '" alt="" decoding="async"' +
+      (s.w ? ' width="' + s.w + '" height="' + s.h + '"' : "") + ">" : '<div class="empty">no media</div>';
+    return '<article class="panel card" data-k="' + s.suite + "/" + s.name + '" tabindex="0">' +
+      '<div class="thumb">' + thumb + (st && !s.contrast ? '<span class="dval">d ' + (st.d >= 0 ? "+" : "") + st.d.toFixed(2) + "</span>" : "") + "</div>" +
+      '<div class="cb"><div class="suite-tag">' + s.suite + " · " + esc(pretty(s.category)).toUpperCase() + '</div><div class="cn">' + esc(pretty(s.name)) + "</div>" +
+      '<div class="chips">' + statusChip(s) + (s.contrast ? "" : visionChip(s)) + "</div>" + metric + "</div></article>";
+  }
+
+  // Nothing below the fold downloads until it is about to be seen. Native lazy loading
+  // was measured fetching all 57 posters (1.4 MB) on first paint of a long grid, and a
+  // <video poster> is never lazy at all, so both are driven from here instead.
+  function reveal(el) {
+    if (el.tagName === "IMG") { if (el.dataset.src) el.src = el.dataset.src; return; }
+    if (el.dataset.poster && !el.poster) el.poster = el.dataset.poster;
+    if (!el.getAttribute("src") && el.dataset.src) el.src = el.dataset.src;
+  }
+  var io = "IntersectionObserver" in window ? new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      var el = e.target;
+      if (e.isIntersecting) {
+        reveal(el);
+        if (el.tagName === "IMG") { io.unobserve(el); return; }
+        if (el.hasAttribute("data-auto")) el.play().catch(function () {});
+      } else if (el.tagName === "VIDEO" && !el.paused) { el.pause(); }
+    });
+  }, { rootMargin: "300px 0px" }) : null;
+  function armVideos(root) {
+    root.querySelectorAll("video[data-src], img[data-src]").forEach(function (el) {
+      if (io) { io.observe(el); } else { reveal(el); }
+    });
+  }
+
+  var featured = shifts.slice().sort(function (a, b) {
+    var va = (a.vision && (a.vision.verdict === "applied" || a.vision.verdict === "partially_applied")) ? 1 : 0;
+    var vb = (b.vision && (b.vision.verdict === "applied" || b.vision.verdict === "partially_applied")) ? 1 : 0;
+    return (b.klass === "CONFIRMED") - (a.klass === "CONFIRMED") || (vb - va) || ((b.stats.d || 0) - (a.stats.d || 0));
+  }).slice(0, 4);
+  $("featured").innerHTML = featured.map(featuredCard).join("");
+  armVideos($("featured"));
+
+  var FILTER = "ALL", SORT = "d";
+  $("suiteSeg").innerHTML = ['<button data-f="ALL" aria-pressed="true">ALL · ' + shifts.length + "</button>"].concat(
+    D.suites.filter(function (s) { return s.shifted > 0; }).map(function (s) {
+      return '<button data-f="' + s.id + '" aria-pressed="false">' + s.id + " · " + shifts.filter(function (x) { return x.suite === s.id; }).length + "</button>";
+    })).join("");
+  function renderGrid() {
+    var rows = shifts.filter(function (s) { return FILTER === "ALL" || s.suite === FILTER; });
+    var key = {
+      d: function (s) { return -(s.stats.d || 0); },
+      arm: function (s) { return -((s.stats.between || 0) - (s.stats.within || 0)); },
+      grip: function (s) { return -((s.stats.gb || 0) - (s.stats.gw || 0)); },
+      suite: function (s) { return s.suite; }
+    }[SORT];
+    rows.sort(function (a, b) { var x = key(a), y = key(b); return x < y ? -1 : x > y ? 1 : 0; });
+    $("grid").innerHTML = rows.map(card).join("");
+    armVideos($("grid"));
+    wireHover($("grid"));
+  }
+  $("suiteSeg").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    FILTER = b.dataset.f;
+    this.querySelectorAll("button").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+    renderGrid();
+  });
+  $("sortSeg").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    SORT = b.dataset.s;
+    this.querySelectorAll("button").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+    renderGrid();
+  });
+  renderGrid();
+  $("contrast").innerHTML = contrast.map(card).join("");
+  armVideos($("contrast"));
+
+  // Hovering a card plays its render in place of the poster.
+  function wireHover(root) {
+    root.querySelectorAll(".card").forEach(function (c) {
+      var s = find(c.dataset.k); if (!s || !s.video) return;
+      var th = c.querySelector(".thumb"), img = th.querySelector("img"), vid = null;
+      c.addEventListener("mouseenter", function () {
+        if (!vid) { vid = document.createElement("video"); vid.src = s.video; vid.muted = true; vid.loop = true; vid.playsInline = true; }
+        if (img) img.replaceWith(vid); vid.play().catch(function () {});
+      });
+      c.addEventListener("mouseleave", function () { if (vid) { vid.pause(); if (img) vid.replaceWith(img); } });
+    });
+  }
+  wireHover($("contrast"));
+
+  // ---- suites table -------------------------------------------------------------
+  (function () {
+    var maxS = Math.max.apply(null, D.suites.map(function (s) { return s.shifted; }));
+    var date = function (st) { var m = /(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(st); if (!m) return st;
+      var mon = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"][+m[2] - 1]; return m[3] + " " + mon + " " + m[4] + ":" + m[5]; };
+    var head = "<thead><tr><th>Suite</th><th>Started</th><th>Cameras</th><th>Proposed</th><th>Tested</th><th>Policy shifts</th><th>Compute</th></tr></thead>";
+    var body = D.suites.map(function (s) {
+      return "<tr><td class=\"mono\">" + s.id + "</td><td class=\"mono\">" + date(s.started) + "</td><td>" + s.views.map(function (v) { return CAM[v] || v; }).join(" · ") +
+        "</td><td class=\"mono\">" + s.proposed + "</td><td class=\"mono\">" + s.tested + "</td><td class=\"mono\"><span class=\"pip\" style=\"width:" + (s.shifted / maxS * 80) + "px\"></span>" + s.shifted +
+        "</td><td class=\"mono\">$" + Number(s.cost).toFixed(2) + "</td></tr>";
+    }).join("");
+    var t = D.totals;
+    body += "<tr><td class=\"mono\"><b>TOTAL</b></td><td></td><td></td><td class=\"mono\"><b>" + t.proposed + "</b></td><td class=\"mono\"><b>" + t.tested + "</b></td><td class=\"mono\"><b>" + t.shifted + "</b></td><td class=\"mono\"><b>$" + t.cost.toFixed(2) + "</b></td></tr>";
+    $("suiteTable").innerHTML = head + "<tbody>" + body + "</tbody>";
+  })();
+
+  // ---- established ----------------------------------------------------------------
+  (function () {
+    var top = shifts.slice().sort(function (a, b) { return b.stats.d - a.stats.d; })[0];
+    var grip = shifts.filter(function (s) { return s.stats.sig_grip; });
+    var withWrist = D.suites.filter(function (s) { return s.views.indexOf("wrist_image_left") >= 0 && s.control.stats; });
+    var wristD = withWrist.map(function (s) { return s.control.stats.d; });
+    var ver = shifts.filter(function (s) { return s.klass === "CONFIRMED"; })[0];
+    var cards = [
+      [D.totals.shifted + " shifts", "Appearance alone moves this policy",
+        "Across " + D.totals.suites + " suites, " + D.totals.shifted + " of " + D.totals.tested + " tested situations moved the policy's intended actions beyond its own run-to-run variation, surviving Benjamini-Hochberg correction across each suite."],
+      ["d " + top.stats.d.toFixed(2), "Shifts are large, not marginal",
+        "The strongest, " + pretty(top.name) + ", moved the arm plan " + deg(top.stats.between).toFixed(1) + "° from the control against " + deg(top.stats.within).toFixed(1) + "° of natural variation. Median effect across all shifts is d " + median(shifts.map(function (s) { return s.stats.d; })).toFixed(2) + "."],
+      [grip.length + " grasps", "Some changes reach the decision itself",
+        "In " + grip.length + " situations the gripper command flipped more often than chance allows (" + grip.map(function (s) { return pretty(s.name); }).join(", ") + "). A changed grasp is a different plan, not a wobble."],
+      ["d " + Math.min.apply(null, wristD).toFixed(1) + " to " + Math.max.apply(null, wristD).toFixed(1), "The control matters",
+        "With the wrist camera included, re-rendering the scene with no change at all shifted the policy in " + withWrist.length + " of " + withWrist.length + " suites. Measuring against a no-op re-render, as PENUMBRA does, keeps that artefact out of every result."],
+      ["2 checks", "Every render is inspected",
+        "A calibrated geometry gate rejects renders that distort the scene, and an independent vision model records what each render shows, camera by camera. " +
+        (ver ? pretty(ver.name) + " passed every check, verified on both cameras." : "")],
+      ["$" + D.totals.cost.toFixed(0), "Cheap enough to sweep",
+        D.totals.proposed + " situations proposed and " + D.totals.tested + " tested for about $" + D.totals.cost.toFixed(2) + " of rendering and policy compute, on one laptop with cloud models."]
+    ];
+    $("est").innerHTML = cards.map(function (c) {
+      return '<div class="panel cut"><div class="big num">' + esc(c[0]) + "</div><h3>" + esc(c[1]) + "</h3><p>" + esc(c[2]) + "</p></div>";
+    }).join("");
+  })();
+  function median(a) { var b = a.slice().sort(function (x, y) { return x - y; }); var m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; }
+
+  // ---- detail dialog ----------------------------------------------------------------
+  function find(k) { var p = k.split("/"); return D.scenarios.filter(function (s) { return s.suite === p[0] && s.name === p[1]; })[0]; }
+  function openDetail(s) {
+    var st = s.stats, g = s.gate, v = s.vision, suite = suiteById[s.suite] || {};
+    var cams = "";
+    if (v && v.per_view && Object.keys(v.per_view).length) {
+      cams = '<div class="camrow">' + Object.keys(v.per_view).map(function (k) {
+        var x = v.per_view[k]; return "<b>" + (CAM[k] || k) + "</b><span>" + esc(pretty(x.verdict)) + ": " + esc(x.observed) + "</span>";
+      }).join("") + "</div>";
+    }
+    var statsKv = st ? '<dl class="kv">' +
+      "<dt>Arm plan vs control</dt><dd>" + deg(st.between).toFixed(2) + "° (" + st.between.toFixed(4) + " rad)</dd>" +
+      "<dt>Natural variation</dt><dd>" + deg(st.within).toFixed(2) + "° (" + st.within.toFixed(4) + " rad)</dd>" +
+      "<dt>Shift beyond noise</dt><dd>+" + deg(st.between - st.within).toFixed(2) + "°</dd>" +
+      "<dt>Grasp flips</dt><dd>" + ((st.gb || 0) * 100).toFixed(1) + "% vs " + ((st.gw || 0) * 100).toFixed(1) + "% natural</dd>" +
+      "<dt>Effect size</dt><dd>d " + (st.d >= 0 ? "+" : "") + st.d.toFixed(3) + "</dd>" +
+      "<dt>Trajectory test</dt><dd>p " + fmtP(st.p) + (st.sig_arm ? "  · significant" : "") + "</dd>" +
+      "<dt>Grasp test</dt><dd>p " + fmtP(st.gp) + (st.sig_grip ? "  · significant" : "") + "</dd>" +
+      "<dt>Rollouts</dt><dd>" + st.n + " control · " + st.m + " situation</dd>" +
+      "<dt>Suite correction</dt><dd>" + (s.fdr ? "passes Benjamini-Hochberg" : "not applied") + (s.bonf ? " · passes Bonferroni" : "") + (s.fdr_retro ? " (applied after the run)" : "") + "</dd>" +
+      "</dl>" : '<p>No policy test: this render did not reach the policy.</p>';
+    var gateKv = g ? '<dl class="kv"><dt>Gate</dt><dd>' + esc(g.status) + "</dd>" +
+      (g.drift_px != null ? "<dt>Scene drift</dt><dd>" + Number(g.drift_px).toFixed(2) + " px equivalent</dd>" : "") +
+      (g.structure != null ? "<dt>Structure kept</dt><dd>" + Number(g.structure).toFixed(3) + "</dd>" : "") +
+      (g.temporal != null ? "<dt>Temporal ratio</dt><dd>" + Number(g.temporal).toFixed(2) + "</dd>" : "") +
+      "<dt>Render attempts</dt><dd>" + s.attempts + "</dd></dl>" +
+      (g.reasons.length ? '<p style="margin-top:10px">' + esc(g.reasons[0]) + "</p>" : "") : "";
+    $("detail").innerHTML =
+      '<div class="dhead"><div><div class="suite-tag">' + s.suite + " · " + esc(pretty(s.category)).toUpperCase() + " · " + (suite.views || []).map(function (x) { return CAM[x] || x; }).join(" · ") +
+      '</div><div class="fname" id="dTitle">' + esc(pretty(s.name)) + '</div></div><button class="x" data-close>CLOSE</button></div>' +
+      '<div class="dbody"><div class="dleft">' + viewer(s, true) +
+        '<div class="dsec"><h4>Situation</h4><p>' + esc(s.situation) + "</p></div>" +
+        (s.why ? '<div class="dsec"><h4>Why it might matter to the policy</h4><p>' + esc(s.why) + "</p></div>" : "") +
+        '<div class="dsec"><h4>Prompt sent to the renderer</h4><div class="prompt">' + esc(s.prompt) + "</div></div>" +
+      "</div><div>" +
+        '<div class="dsec"><div class="chips">' + statusChip(s) + (s.contrast ? "" : visionChip(s)) + "</div></div>" +
+        '<div class="dsec"><h4>Policy response</h4>' + statsKv + "</div>" +
+        (v ? '<div class="dsec"><h4>Vision check</h4><p>' + esc(v.observed) + "</p>" + cams + "</div>" : "") +
+        (gateKv ? '<div class="dsec"><h4>Validity</h4>' + gateKv + "</div>" : "") +
+      "</div></div>";
+    $("detail").showModal();
+    var dv = $("detail").querySelector("video[data-src]");
+    if (dv) { reveal(dv); dv.play().catch(function () {}); }
+  }
+  document.addEventListener("click", function (e) {
+    if (e.target.closest("[data-close]")) { $("detail").close(); return; }
+    if (e.target === $("detail")) { $("detail").close(); return; }
+    var c = e.target.closest("[data-k]");
+    if (c && !$("detail").contains(c)) { var s = find(c.dataset.k); if (s) openDetail(s); }
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter") return;
+    var c = document.activeElement && document.activeElement.closest && document.activeElement.closest("[data-k]");
+    if (c) { var s = find(c.dataset.k); if (s) openDetail(s); }
+  });
+  $("detail").addEventListener("close", function () { $("detail").innerHTML = ""; });
+})();
+</script>
+</body>
+</html>

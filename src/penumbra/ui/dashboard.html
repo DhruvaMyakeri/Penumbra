@@ -275,7 +275,17 @@ function findingClass(s) {
      the friendlier direction. Old runs have no cross-camera check, so a render their
      judge accepted is still only provisionally attributable - `coherent` being absent
      is treated as unknown, not as agreement. */
-  if (s.finding_class) { return s.finding_class; }
+  var multi = s.per_view_gate && Object.keys(s.per_view_gate).length > 1;
+  /* With two or more perturbed cameras, agreement between them has to be established,
+     not assumed: each camera is a separate unseeded render. This applies to stored
+     values too, because runs recorded before the rule existed stored CONFIRMED on the
+     strength of a cross-camera check that never ran. */
+  if (s.finding_class) {
+    if (s.finding_class === "CONFIRMED" && multi && (s.intent || {}).coherent !== true) {
+      return "UNATTRIBUTED";
+    }
+    return s.finding_class;
+  }
   if (s.status === "no_change") { return "DECLINED"; }
   if (s.status === "rejected") { return "REJECTED"; }
   if (s.status === "error") { return "ERROR"; }
@@ -284,6 +294,7 @@ function findingClass(s) {
   var iv = s.intent || {};
   if (iv.coherent === false) { return "UNATTRIBUTED"; }
   if (!iv.verdict || iv.error || iv.credible === false) { return "UNATTRIBUTED"; }
+  if (multi && iv.coherent !== true) { return "UNATTRIBUTED"; }
   return "CONFIRMED";
 }
 
@@ -296,10 +307,10 @@ function statusTag(s) {
        entitled to its own name, and showing them under one label is what let a suite
        advertise fifteen findings that adjudication cut to three. */
     if (findingClass(s) === "CONFIRMED") {
-      return ["hit", "t-hit", s.passes_bonferroni ? "confirmed · strong" : "confirmed"];
+      return ["hit", "t-hit", s.passes_bonferroni ? "verified · strong" : "verified"];
     }
     if (findingClass(s) === "UNATTRIBUTED") {
-      return ["unatt", "t-unatt", "moved policy · cause unknown"];
+      return ["unatt", "t-unatt", "policy shift"];
     }
     /* Significant alone but not after suite-wide correction: say so, rather than
        showing it as a plain miss. */
@@ -584,8 +595,9 @@ function render(st) {
     /* The headline is CONFIRMED alone. "Moved the policy" sits beside it rather than
        inside it: those two numbers came apart badly once and the split has to be the
        first thing a reader sees, not a footnote. */
-    ["Confirmed findings", hits, hits > 0],
-    ["Moved policy, cause unknown", unatt, false],
+    ["Policy shifts", hits + unatt, hits + unatt > 0],
+    /* A shift whose render also passed the cross-camera check and the vision judge. */
+    ["Verified on both cameras", hits, false],
     ["Renders rejected", rej, false],
     /* How often the editor actually produced the situation it was asked for. Low here
        is not a bug in the suite - it is a measured property of the video model, and it
@@ -639,7 +651,7 @@ function render(st) {
   var counts = { all: sc.length, hits: 0, unatt: 0, clear: 0, rejected: 0,
                  nochange: 0, pending: 0 };
   sc.forEach(function (s) { counts[bucket(s)] += 1; });
-  var labels = [["all", "all"], ["hits", "confirmed"], ["unatt", "cause unknown"],
+  var labels = [["all", "all"], ["hits", "verified"], ["unatt", "policy shift"],
                 ["clear", "no effect"], ["rejected", "rejected"],
                 ["nochange", "editor declined"], ["pending", "pending"]];
   $("chips").innerHTML = labels.map(function (l) {

@@ -1,36 +1,14 @@
-# REACTOR CAPABILITY REPORT
+# Reactor capability report
 
 Experimentally verified by connecting to live Reactor endpoints with the account's
 API key. Every line marked `VERIFIED` was observed on the wire, not read from
-marketing or inferred from the research document.
+marketing or inferred.
 
 - **Probed:** 2026-08-21
 - **SDK:** `reactor-sdk` 1.1.0 (PyPI, `py3-none-win_amd64`, ships `reactor_ffi.dll`)
 - **Coordinator:** `https://api.reactor.inc`
 - **Raw evidence:** `runs/_probe/*.json` (status timelines, capabilities, full OpenAPI schemas)
 - **Reproduce:** `python tools/probe_reactor.py xmax/x2 reactor/cosmos-nano-policy-droid`
-
----
-
-## 0. Corrections to `docs/PENUMBRA_RESEARCH.md`
-
-The research document is wrong on several load-bearing points. These were found in
-the first hour, exactly as it instructed.
-
-| Research doc claims | Reality | Status |
-|---|---|---|
-| X2 is `reactor/x2` | X2 is **`xmax/x2`**. `reactor/x2` returns `403 - requested model is not available to this API key` | **FAILED, CORRECTED** |
-| Catalogue has 8 models | Catalogue has **24** models | **CORRECTED** |
-| No robot policy available; plan for OpenVLA-7B on a rented A100 | Reactor hosts **`reactor/cosmos-nano-policy-droid`**, a real video+proprio to action VLA, served over the same protocol | **NEW, MAJOR** |
-| Python SDK is "async, decorator-based" | Confirmed. `@track.on_frame` delivers `(H,W,3)` uint8 RGB NumPy arrays; `track.push_frame(ndarray)` sends them | **VERIFIED** |
-| `getCapabilities()` returns `{protocol_version, tracks[], commands[], emission_fps}` | Capabilities carry only `{protocol_version, tracks[]}`. Commands come from a **separate** `request_schema()` call returning an **OpenAPI 3 document**. No `emission_fps` field exists | **PARTIALLY FAILED, CORRECTED** |
-| `/models` catalogue undiscoverable | `GET /models` with header `Reactor-API-Key` returns the full catalogue as JSON | **VERIFIED** |
-
-Additional catalogue models relevant to PENUMBRA that the research document does not
-mention at all: `reactor/cosmos-transfer`, `reactor/groot-n17`,
-`reactor/dreamzero-yam-molmoact2`, `reactor/xr1-robocasa365`,
-`forge/so101-dream-drive`, `reactor/omnidreams`, `reactor/happy-oyster-adventure`,
-`reactor/happy-oyster-director`.
 
 ---
 
@@ -154,8 +132,8 @@ mention at all: `reactor/cosmos-transfer`, `reactor/groot-n17`,
 
 ## 2. `reactor/cosmos-nano-policy-droid` - the policy under test
 
-**This model was not known to the research document and changes the plan for the
-better: PENUMBRA gets a real VLA instead of a detector proxy, with no local GPU.**
+**A real vision-language-action policy served over the same API as the renderer, so the
+whole loop runs with no local GPU.**
 
 | Field | Value | Status |
 |---|---|---|
@@ -186,8 +164,8 @@ hard flow-control handshake, not an optional acknowledgement.
   a drop-in - physics, geometry, ego-motion and proprio all come from the recording.
 - It emits a **continuous 8-DoF action chunk**, so action divergence is well defined
   (normalized L2, gripper-state flips, per-joint attribution) rather than forced.
-- `exterior_view_1` is the stream PENUMBRA perturbs. `wrist_view` and proprio stay
-  untouched - a clean single-variable intervention.
+- Any subset of the three camera streams can be perturbed (`--views`) while proprioception
+  stays untouched, so the intervention is visual only.
 
 ---
 

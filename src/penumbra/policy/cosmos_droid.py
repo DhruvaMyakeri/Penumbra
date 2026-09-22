@@ -15,7 +15,7 @@ differ in exactly one thing: the pixels of ``exterior_view_1``.
 
 That is deliberate, and it is what makes this a controlled experiment rather than a
 divergent simulation. It also means the measurement is *action divergence under
-intervention*, not task success — see docs/RESEARCH.md for what that does and does
+intervention*, not task success — see docs/METHODOLOGY.md for what that does and does
 not license us to claim.
 """
 from __future__ import annotations

@@ -38,7 +38,7 @@ each is compared against alpha / 2.
 ### What this does and does not license
 It licenses: "the perturbation shifted the policy's action distribution, and here is
 how unlikely that is under the null." It does not license any statement about task
-success, closed-loop outcome, or the real robot. See docs/RESEARCH.md.
+success, closed-loop outcome, or the real robot. See docs/METHODOLOGY.md.
 """
 from __future__ import annotations
 

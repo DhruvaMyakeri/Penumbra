@@ -7,3 +7,10 @@ data/
 *.mp4
 *.npz
 scratch/
+
+# Local-only: agent instructions and internal working notes
+CLAUDE.md
+docs/_internal/
+
+# The showcase ships its own re-encoded clips
+!demo/assets/media/**/*.mp4

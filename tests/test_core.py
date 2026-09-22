@@ -284,14 +284,14 @@ def test_gate_is_blind_to_a_small_region_moving():
 
     A patch covering roughly a tenth of the frame can slide 16 px and pass both
     statistics. SEAM v1 bounds geometry corruption; it does not eliminate it. See
-    docs/LIMITATIONS.md.
+    docs/METHODOLOGY.md.
     """
     ep = make_episode(16)
     src = ep.frames["exterior_image_1_left"].copy()
     moved = src.copy()
     moved[:, 28:62, 8:52] = np.roll(moved[:, 28:62, 8:52], 16, axis=2)
     report = SeamGate().validate(src, moved)
-    assert report.valid, "if this now fails the gate improved; update docs/LIMITATIONS.md"
+    assert report.valid, "if this now fails the gate improved; update docs/METHODOLOGY.md"
 
 
 def test_thresholds_separate_measured_appearance_edits_from_measured_shifts():
@@ -326,7 +326,7 @@ def test_gate_is_documented_as_blind_to_the_aperture_problem():
     shifted = np.roll(src, 22, axis=2)
     report = SeamGate().validate(src, shifted)
     assert report.geometry_drift < 0.05, (
-        "if this ever fails the gate got strictly better; update docs/LIMITATIONS.md"
+        "if this ever fails the gate got strictly better; update docs/METHODOLOGY.md"
     )
 
 

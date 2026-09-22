@@ -19,8 +19,8 @@ The ``lessons`` field exists for agent-authored notes and is kept separate and c
 labelled, so a model can never launder a guess into the evidence table.
 
 **Priors are labelled as priors.** The ledger opens carrying the measured rates from
-``docs/X2_PROMPT_RULES.md`` (92 renders, previous suites) so that early scenarios are not
-advised by a sample of two. As this run accumulates its own observations they are
+previous suites (92 renders; see "Prompt structure" in ``docs/METHODOLOGY.md``) so that
+early scenarios are not advised by a sample of two. As this run accumulates its own observations they are
 reported alongside the prior, never silently merged into it.
 """
 from __future__ import annotations
@@ -53,7 +53,7 @@ CAMERA_SPACE = re.compile(
     r"\b(camera|lens|frame|viewfinder|image sensor|the shot|the view)\b", re.I
 )
 
-#: The prior, from docs/X2_PROMPT_RULES.md. n=92 judged renders, previous suites.
+#: The prior: n=92 judged renders from previous suites (docs/METHODOLOGY.md).
 PRIOR = {
     "objects_named": {
         0: {"n": 15, "usable": 0.533, "invented": 0.400},
