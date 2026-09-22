@@ -8,7 +8,7 @@
 
 PENUMBRA takes a real robot recording, repaints what the cameras see with a generative video model, and replays the result to a vision-language-action policy. Physics, geometry, camera motion and the robot's own trajectory all come from the recording, so the only thing that changes is appearance. It then asks a precise question: **did the policy's intended actions shift, beyond its own run-to-run variation, compared with a matched control?**
 
-**[Open the showcase](demo/index.html)**: every suite, every policy shift, with the original and repainted camera views side by side and the measured change in the policy's plan.
+**[Open the live showcase](https://dhruvamyakeri.github.io/Penumbra/)**: every suite, every policy shift, with the original and repainted camera views side by side and the measured change in the policy's plan.
 
 ---
 
